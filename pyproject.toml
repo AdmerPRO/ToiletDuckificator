@@ -11,5 +11,9 @@ requires-python = ">=3.11"
 [project.scripts]
 toiletduckificator = "toiletduckificator.gui:main"
 
+[tool.setuptools.packages.find]
+include = ["toiletduckificator*"]
+exclude = ["tests*", "example_*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
