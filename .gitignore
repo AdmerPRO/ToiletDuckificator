@@ -208,7 +208,7 @@ __marimo__/
 
 # ToiletDuckified
 *_duckified
-*.td
+*.duck
 
 # Archives
 *.rar

@@ -259,6 +259,56 @@ def _build_folder_layout(
     return relative_output_paths, module_name_map
 
 
+def _collect_imported_symbol_dependencies(
+    py_files: list[Path],
+    source_root: Path,
+) -> dict[str, set[str]]:
+    sources_by_module: dict[str, str] = {}
+    local_modules = {
+        module_name
+        for module_name in (_module_name_from_relative_path(py_file.relative_to(source_root)) for py_file in py_files)
+        if module_name is not None
+    }
+    protected_names: dict[str, set[str]] = {}
+    fully_protected_modules: set[str] = set()
+
+    for py_file in py_files:
+        relative_path = py_file.relative_to(source_root)
+        current_module = _module_name_from_relative_path(relative_path)
+        source = py_file.read_text(encoding="utf-8")
+        if current_module is not None:
+            sources_by_module[current_module] = source
+        tree = ast.parse(source, filename=str(py_file))
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                absolute_module = _resolve_import_from_module(node.module, node.level, current_module)
+                if absolute_module not in local_modules:
+                    continue
+                protected_names.setdefault(absolute_module, set()).update(
+                    alias.name for alias in node.names if alias.name != "*"
+                )
+                continue
+
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in local_modules:
+                        fully_protected_modules.add(alias.name)
+
+    for module_name in fully_protected_modules:
+        source = sources_by_module.get(module_name)
+        if source is None:
+            continue
+        table = symtable.symtable(source, module_name, "exec")
+        protected_names.setdefault(module_name, set()).update(
+            name
+            for name in table.get_identifiers()
+            if name.isidentifier() and not (name.startswith("__") and name.endswith("__"))
+        )
+
+    return protected_names
+
+
 def _scope_kind(node: ast.AST) -> str:
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
         return "function"
@@ -355,8 +405,10 @@ class VariableObfuscator(ast.NodeTransformer):
         self,
         root_table: symtable.SymbolTable,
         scope_map: dict[int, symtable.SymbolTable],
+        protected_module_names: set[str] | None = None,
     ) -> None:
         self.scope_map = scope_map
+        self.protected_module_names = protected_module_names or set()
         self.used_names: set[str] = set()
         self.scope_stack: list[ScopeInfo] = [ScopeInfo(root_table, self._make_rename_map(root_table), {}, None)]
         self.class_stack: list[ClassContext] = []
@@ -370,6 +422,8 @@ class VariableObfuscator(ast.NodeTransformer):
         rename_map: dict[str, str] = {}
         for name in table.get_identifiers():
             symbol = table.lookup(name)
+            if table.get_type() == "module" and name in self.protected_module_names:
+                continue
             if _should_rename(table, symbol, name):
                 length = FUNCTION_NAME_LENGTH if _is_function_symbol(symbol) else VARIABLE_NAME_LENGTH
                 rename_map[name] = generate_identifier(self.used_names, length=length)
@@ -761,7 +815,11 @@ class ModuleImportObfuscator(ast.NodeTransformer):
 
     def visit_Import(self, node: ast.Import) -> ast.AST:
         for alias in node.names:
-            alias.name = self.module_name_map.get(alias.name, alias.name)
+            original_name = alias.name
+            remapped_name = self.module_name_map.get(alias.name, alias.name)
+            alias.name = remapped_name
+            if original_name != remapped_name and alias.asname is None and "." not in original_name:
+                alias.asname = original_name
         return node
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.AST:
@@ -1175,6 +1233,7 @@ def obfuscate_source(
     *,
     current_module: str | None = None,
     module_name_map: dict[str, str] | None = None,
+    protected_module_names: set[str] | None = None,
     options: ObfuscationOptions | None = None,
 ) -> str:
     options = options or ObfuscationOptions()
@@ -1187,7 +1246,11 @@ def obfuscate_source(
     scope_map = _build_scope_table_map(tree, symbol_table)
     transformed: ast.AST = tree
     if options.rename_identifiers:
-        transformed = VariableObfuscator(symbol_table, scope_map).visit(transformed)
+        transformed = VariableObfuscator(
+            symbol_table,
+            scope_map,
+            protected_module_names=protected_module_names,
+        ).visit(transformed)
     if options.obfuscate_literals:
         transformed = LiteralObfuscator().visit(transformed)
     if options.rename_modules and module_name_map:
@@ -1263,6 +1326,7 @@ def obfuscate_path(
     output_root.mkdir(parents=True, exist_ok=True)
     results: list[ObfuscationResult] = []
     py_files = sorted(source_path.rglob("*.py"))
+    protected_names_by_module = _collect_imported_symbol_dependencies(py_files, source_path)
     if options.rename_modules:
         relative_output_paths, module_name_map = _build_folder_layout(py_files, source_path)
     else:
@@ -1280,6 +1344,7 @@ def obfuscate_path(
                 destination,
                 current_module=current_module,
                 module_name_map=module_name_map,
+                protected_module_names=protected_names_by_module.get(current_module, set()),
                 options=options,
             )
         )
@@ -1292,6 +1357,7 @@ def _obfuscate_single_file(
     *,
     current_module: str | None = None,
     module_name_map: dict[str, str] | None = None,
+    protected_module_names: set[str] | None = None,
     options: ObfuscationOptions | None = None,
 ) -> ObfuscationResult:
     original = source_path.read_text(encoding="utf-8")
@@ -1300,6 +1366,7 @@ def _obfuscate_single_file(
         filename=str(source_path),
         current_module=current_module,
         module_name_map=module_name_map,
+        protected_module_names=protected_module_names,
         options=options,
     )
     output_path.write_text(obfuscated, encoding="utf-8")

