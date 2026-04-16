@@ -5,6 +5,7 @@ import symtable
 from dataclasses import dataclass
 from pathlib import Path
 import re
+from typing import TypeAlias
 
 from .name_generator import generate_identifier
 
@@ -23,6 +24,9 @@ SCOPE_NODE_TYPES = (
     ast.DictComp,
     ast.GeneratorExp,
 )
+
+FunctionLikeNode: TypeAlias = ast.FunctionDef | ast.AsyncFunctionDef
+ComprehensionNode: TypeAlias = ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
 
 
 @dataclass(slots=True)
@@ -192,7 +196,7 @@ class VariableObfuscator(ast.NodeTransformer):
     def _exit_scope(self) -> None:
         self.scope_stack.pop()
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+    def _visit_function_scope(self, node: FunctionLikeNode) -> FunctionLikeNode:
         node.name = self.current_scope.rename_map.get(node.name, node.name)
         node.decorator_list = [self.visit(item) for item in node.decorator_list]
         if node.returns:
@@ -205,9 +209,11 @@ class VariableObfuscator(ast.NodeTransformer):
         self._exit_scope()
         return node
 
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        return self._visit_function_scope(node)
+
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
-        node.name = self.current_scope.rename_map.get(node.name, node.name)
-        return self.visit_FunctionDef(node)
+        return self._visit_function_scope(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> ast.AST:
         self._with_new_scope(node)
@@ -237,7 +243,7 @@ class VariableObfuscator(ast.NodeTransformer):
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> ast.AST:
         return self._visit_comprehension_scope(node)
 
-    def _visit_comprehension_scope(self, node: ast.AST) -> ast.AST:
+    def _visit_comprehension_scope(self, node: ComprehensionNode) -> ComprehensionNode:
         generators = node.generators
         if not generators:
             return node
