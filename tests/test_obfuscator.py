@@ -5,7 +5,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from toiletduckificator.obfuscator import obfuscate_path, obfuscate_source
+from toiletduckificator.obfuscator import ObfuscationOptions, obfuscate_path, obfuscate_source
 
 
 IDENTIFIER_RE = re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_]{15}\b")
@@ -338,6 +338,43 @@ class TestObfuscator(unittest.TestCase):
         namespace: dict[str, object] = {}
         exec(result, namespace)
         self.assertIn(5, _user_data_values(namespace))
+
+    def test_can_disable_literal_obfuscation_and_encryption(self) -> None:
+        source = 'value = 513\nlabel = "duck"\n'
+
+        result = obfuscate_source(
+            source,
+            options=ObfuscationOptions(
+                obfuscate_literals=False,
+                encrypt_output=False,
+                minify_output=False,
+            ),
+        )
+
+        self.assertIn("513", result)
+        self.assertIn("duck", result)
+        self.assertNotIn("b85decode", result)
+
+    def test_can_disable_module_renaming_for_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source_root = Path(tmp_dir) / "source"
+            output_root = Path(tmp_dir) / "output"
+            source_root.mkdir()
+            (source_root / "pkg").mkdir()
+            (source_root / "main.py").write_text("from pkg.helper import build\n", encoding="utf-8")
+            (source_root / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+            (source_root / "pkg" / "helper.py").write_text("def build():\n    return 1\n", encoding="utf-8")
+
+            results = obfuscate_path(
+                source_root,
+                output_root,
+                options=ObfuscationOptions(rename_modules=False),
+            )
+
+            output_relative_paths = sorted(result.output_path.relative_to(output_root) for result in results)
+            self.assertIn(Path("main.py"), output_relative_paths)
+            self.assertIn(Path("pkg", "__init__.py"), output_relative_paths)
+            self.assertIn(Path("pkg", "helper.py"), output_relative_paths)
 
 
 if __name__ == "__main__":

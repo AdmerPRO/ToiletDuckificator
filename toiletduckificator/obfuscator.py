@@ -41,6 +41,19 @@ class ObfuscationResult:
     changed: bool
 
 
+@dataclass(slots=True)
+class ObfuscationOptions:
+    rename_identifiers: bool = True
+    obfuscate_literals: bool = True
+    rename_modules: bool = True
+    rewrite_dynamic_imports: bool = True
+    rewrite_for_loops: bool = True
+    wrap_calls: bool = True
+    alias_builtins: bool = True
+    minify_output: bool = True
+    encrypt_output: bool = True
+
+
 class ObfuscatorError(Exception):
     """Raised when the input cannot be obfuscated."""
 
@@ -897,7 +910,9 @@ def obfuscate_source(
     *,
     current_module: str | None = None,
     module_name_map: dict[str, str] | None = None,
+    options: ObfuscationOptions | None = None,
 ) -> str:
+    options = options or ObfuscationOptions()
     try:
         tree = ast.parse(source, filename=filename)
         symbol_table = symtable.symtable(source, filename, "exec")
@@ -905,20 +920,46 @@ def obfuscate_source(
         raise ObfuscatorError(str(error)) from error
 
     scope_map = _build_scope_table_map(tree, symbol_table)
-    transformed: ast.AST = VariableObfuscator(symbol_table, scope_map).visit(tree)
-    transformed = LiteralObfuscator().visit(transformed)
-    if module_name_map:
+    transformed: ast.AST = tree
+    if options.rename_identifiers:
+        transformed = VariableObfuscator(symbol_table, scope_map).visit(transformed)
+    if options.obfuscate_literals:
+        transformed = LiteralObfuscator().visit(transformed)
+    if options.rename_modules and module_name_map:
         transformed = ModuleImportObfuscator(module_name_map, current_module).visit(transformed)
-    transformed = DynamicImportObfuscator().visit(transformed)
-    transformed = ForLoopObfuscator().visit(transformed)
-    call_wrapper = CallWrapperObfuscator()
-    transformed = call_wrapper.visit(transformed)
-    builtin_aliaser = BuiltinAliasObfuscator()
-    transformed = builtin_aliaser.visit(transformed)
+    if options.rewrite_dynamic_imports:
+        transformed = DynamicImportObfuscator().visit(transformed)
+    if options.rewrite_for_loops:
+        transformed = ForLoopObfuscator().visit(transformed)
+
+    call_wrapper: CallWrapperObfuscator | None = None
+    if options.wrap_calls:
+        call_wrapper = CallWrapperObfuscator()
+        transformed = call_wrapper.visit(transformed)
+
+    builtin_aliaser: BuiltinAliasObfuscator | None = None
+    if options.alias_builtins:
+        builtin_aliaser = BuiltinAliasObfuscator()
+        transformed = builtin_aliaser.visit(transformed)
+
     if isinstance(transformed, ast.Module):
-        transformed.body = builtin_aliaser.build_alias_assignments() + [call_wrapper.build_wrapper_function()] + transformed.body
+        prefix_statements: list[ast.stmt] = []
+        if builtin_aliaser is not None:
+            prefix_statements.extend(builtin_aliaser.build_alias_assignments())
+        if call_wrapper is not None:
+            prefix_statements.append(call_wrapper.build_wrapper_function())
+        transformed.body = prefix_statements + transformed.body
     ast.fix_missing_locations(transformed)
-    return _build_runtime_loader(_minify_generated_source(ast.unparse(transformed)))
+
+    output = ast.unparse(transformed)
+    if options.minify_output:
+        output = _minify_generated_source(output)
+    else:
+        output = output.rstrip() + "\n"
+
+    if options.encrypt_output:
+        return _build_runtime_loader(output)
+    return output
 
 
 def _destination_for_file(path: Path, output_root: Path) -> Path:
@@ -927,7 +968,13 @@ def _destination_for_file(path: Path, output_root: Path) -> Path:
     return output_root / path.name
 
 
-def obfuscate_path(path: str | Path, output_path: str | Path | None = None) -> list[ObfuscationResult]:
+def obfuscate_path(
+    path: str | Path,
+    output_path: str | Path | None = None,
+    *,
+    options: ObfuscationOptions | None = None,
+) -> list[ObfuscationResult]:
+    options = options or ObfuscationOptions()
     source_path = Path(path).resolve()
     if not source_path.exists():
         raise ObfuscatorError(f"Path does not exist: {source_path}")
@@ -944,12 +991,16 @@ def obfuscate_path(path: str | Path, output_path: str | Path | None = None) -> l
         if source_path.suffix != ".py":
             raise ObfuscatorError("Only .py files are supported.")
         output_root.parent.mkdir(parents=True, exist_ok=True)
-        return [_obfuscate_single_file(source_path, output_root)]
+        return [_obfuscate_single_file(source_path, output_root, options=options)]
 
     output_root.mkdir(parents=True, exist_ok=True)
     results: list[ObfuscationResult] = []
     py_files = sorted(source_path.rglob("*.py"))
-    relative_output_paths, module_name_map = _build_folder_layout(py_files, source_path)
+    if options.rename_modules:
+        relative_output_paths, module_name_map = _build_folder_layout(py_files, source_path)
+    else:
+        relative_output_paths = {py_file.relative_to(source_path): py_file.relative_to(source_path) for py_file in py_files}
+        module_name_map = {}
 
     for py_file in py_files:
         relative_path = py_file.relative_to(source_path)
@@ -962,6 +1013,7 @@ def obfuscate_path(path: str | Path, output_path: str | Path | None = None) -> l
                 destination,
                 current_module=current_module,
                 module_name_map=module_name_map,
+                options=options,
             )
         )
     return results
@@ -973,6 +1025,7 @@ def _obfuscate_single_file(
     *,
     current_module: str | None = None,
     module_name_map: dict[str, str] | None = None,
+    options: ObfuscationOptions | None = None,
 ) -> ObfuscationResult:
     original = source_path.read_text(encoding="utf-8")
     obfuscated = obfuscate_source(
@@ -980,6 +1033,7 @@ def _obfuscate_single_file(
         filename=str(source_path),
         current_module=current_module,
         module_name_map=module_name_map,
+        options=options,
     )
     output_path.write_text(obfuscated, encoding="utf-8")
     return ObfuscationResult(source_path=source_path, output_path=output_path, changed=original != obfuscated)

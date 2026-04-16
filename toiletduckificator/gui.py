@@ -5,7 +5,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from .obfuscator import ObfuscatorError, obfuscate_path
+from .obfuscator import ObfuscationOptions, ObfuscatorError, obfuscate_path
 
 
 class ToiletDuckificatorApp:
@@ -18,7 +18,18 @@ class ToiletDuckificatorApp:
 
         self.selected_path = tk.StringVar()
         self.output_path = tk.StringVar()
-        self.status_text = tk.StringVar(value="Wybierz plik .py albo folder z plikami Python.")
+        self.status_text = tk.StringVar(value="Select a .py file or a folder with Python files.")
+        self.option_vars = {
+            "rename_identifiers": tk.BooleanVar(value=True),
+            "obfuscate_literals": tk.BooleanVar(value=True),
+            "rename_modules": tk.BooleanVar(value=True),
+            "rewrite_dynamic_imports": tk.BooleanVar(value=True),
+            "rewrite_for_loops": tk.BooleanVar(value=True),
+            "wrap_calls": tk.BooleanVar(value=True),
+            "alias_builtins": tk.BooleanVar(value=True),
+            "minify_output": tk.BooleanVar(value=True),
+            "encrypt_output": tk.BooleanVar(value=True),
+        }
 
         self._build_theme()
         self._build_layout()
@@ -46,7 +57,7 @@ class ToiletDuckificatorApp:
 
         subtitle = ttk.Label(
             outer,
-            text="Obfuskacja nazw, importów, pętli, wywołań builtinów i loader runtime z odszyfrowaniem kodu.",
+            text="Obfuscate names, literals, imports, loops, builtin calls, and the runtime loader.",
             style="Body.TLabel",
             padding=(0, 6, 0, 20),
         )
@@ -55,24 +66,49 @@ class ToiletDuckificatorApp:
         card = ttk.Frame(outer, style="Card.TFrame", padding=22)
         card.pack(fill="x")
 
-        ttk.Label(card, text="Źródło", style="Body.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(card, text="Source", style="Body.TLabel").grid(row=0, column=0, sticky="w")
         source_entry = ttk.Entry(card, textvariable=self.selected_path, style="Path.TEntry", width=72)
         source_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 12))
 
         buttons = ttk.Frame(card, style="Card.TFrame")
         buttons.grid(row=1, column=2, padx=(12, 0), pady=(6, 12), sticky="e")
-        ttk.Button(buttons, text="Wybierz plik", style="Muted.TButton", command=self.pick_file).pack(fill="x")
-        ttk.Button(buttons, text="Wybierz folder", style="Muted.TButton", command=self.pick_folder).pack(fill="x", pady=(10, 0))
+        ttk.Button(buttons, text="Choose File", style="Muted.TButton", command=self.pick_file).pack(fill="x")
+        ttk.Button(buttons, text="Choose Folder", style="Muted.TButton", command=self.pick_folder).pack(fill="x", pady=(10, 0))
 
-        ttk.Label(card, text="Wyjście", style="Body.TLabel").grid(row=2, column=0, sticky="w")
+        ttk.Label(card, text="Output", style="Body.TLabel").grid(row=2, column=0, sticky="w")
         output_entry = ttk.Entry(card, textvariable=self.output_path, style="Path.TEntry", width=72)
         output_entry.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(6, 12))
 
-        ttk.Button(card, text="Uruchom obfuskację", style="Accent.TButton", command=self.run_obfuscation).grid(
+        ttk.Button(card, text="Run Obfuscation", style="Accent.TButton", command=self.run_obfuscation).grid(
             row=4,
             column=0,
             sticky="w",
         )
+
+        options_card = ttk.Frame(outer, style="Card.TFrame", padding=22)
+        options_card.pack(fill="x", pady=(18, 0))
+        ttk.Label(options_card, text="Stages", style="Body.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
+
+        option_labels = [
+            ("rename_identifiers", "Rename identifiers"),
+            ("obfuscate_literals", "Obfuscate literals"),
+            ("rename_modules", "Rename modules and folders"),
+            ("rewrite_dynamic_imports", "Rewrite imports dynamically"),
+            ("rewrite_for_loops", "Rewrite for-loops"),
+            ("wrap_calls", "Wrap function calls"),
+            ("alias_builtins", "Alias builtin functions"),
+            ("minify_output", "Minify generated code"),
+            ("encrypt_output", "Encrypt final output"),
+        ]
+        for index, (option_name, label) in enumerate(option_labels, start=1):
+            ttk.Checkbutton(
+                options_card,
+                text=label,
+                variable=self.option_vars[option_name],
+            ).grid(row=((index - 1) // 3) + 1, column=(index - 1) % 3, sticky="w", padx=(0, 18), pady=4)
+
+        for column in range(3):
+            options_card.columnconfigure(column, weight=1)
 
         card.columnconfigure(0, weight=1)
         card.columnconfigure(1, weight=1)
@@ -80,7 +116,7 @@ class ToiletDuckificatorApp:
         log_card = ttk.Frame(outer, style="Card.TFrame", padding=18)
         log_card.pack(fill="both", expand=True, pady=(18, 0))
 
-        ttk.Label(log_card, text="Log działania", style="Body.TLabel").pack(anchor="w")
+        ttk.Label(log_card, text="Activity Log", style="Body.TLabel").pack(anchor="w")
         self.log = tk.Text(
             log_card,
             wrap="word",
@@ -96,7 +132,7 @@ class ToiletDuckificatorApp:
         footer = ttk.Label(log_card, textvariable=self.status_text, style="Body.TLabel")
         footer.pack(anchor="w")
 
-        self._append_log("Program zapisuje wynik do osobnej ścieżki i pakuje kod w loader uruchamiany dopiero w runtime.")
+        self._append_log("The app writes output to a separate path and can wrap the result in a runtime loader.")
 
     def pick_file(self) -> None:
         path = filedialog.askopenfilename(filetypes=[("Python files", "*.py")])
@@ -116,17 +152,19 @@ class ToiletDuckificatorApp:
         source = self.selected_path.get().strip()
         output = self.output_path.get().strip()
         if not source:
-            messagebox.showerror("Brak źródła", "Najpierw wybierz plik .py albo folder.")
+            messagebox.showerror("Missing Source", "Choose a .py file or a folder first.")
             return
 
-        self.status_text.set("Trwa obfuskacja...")
+        options = self._build_options()
+        self.status_text.set("Obfuscation in progress...")
         self._append_log(f"Start: {source}")
-        worker = threading.Thread(target=self._process, args=(source, output or None), daemon=True)
+        self._append_log(f"Enabled stages: {self._describe_enabled_options(options)}")
+        worker = threading.Thread(target=self._process, args=(source, output or None, options), daemon=True)
         worker.start()
 
-    def _process(self, source: str, output: str | None) -> None:
+    def _process(self, source: str, output: str | None, options: ObfuscationOptions) -> None:
         try:
-            results = obfuscate_path(source, output)
+            results = obfuscate_path(source, output, options=options)
         except ObfuscatorError as error:
             message = str(error)
             self.root.after(0, lambda message=message: self._handle_error(message))
@@ -142,22 +180,47 @@ class ToiletDuckificatorApp:
         for result in results:
             marker = "changed" if result.changed else "unchanged"
             self._append_log(f"[{marker}] {result.source_path} -> {result.output_path}")
-        self.status_text.set(f"Gotowe. Przetworzono {len(results)} plików.")
+        self.status_text.set(f"Done. Processed {len(results)} file(s).")
+        messagebox.showinfo(
+            "Obfuscation Complete",
+            f"Finished successfully.\nProcessed {len(results)} file(s).",
+        )
 
     def _handle_error(self, message: str) -> None:
-        self.status_text.set("Operacja przerwana.")
+        self.status_text.set("Operation aborted.")
         self._append_log(f"ERROR: {message}")
-        messagebox.showerror("Błąd", message)
+        messagebox.showerror("Error", message)
 
     def _append_log(self, message: str) -> None:
         self.log.insert("end", message + "\n")
         self.log.see("end")
 
+    def _build_options(self) -> ObfuscationOptions:
+        return ObfuscationOptions(**{name: variable.get() for name, variable in self.option_vars.items()})
+
+    def _describe_enabled_options(self, options: ObfuscationOptions) -> str:
+        enabled = [
+            label
+            for label, is_enabled in {
+                "rename identifiers": options.rename_identifiers,
+                "obfuscate literals": options.obfuscate_literals,
+                "rename modules": options.rename_modules,
+                "rewrite dynamic imports": options.rewrite_dynamic_imports,
+                "rewrite for-loops": options.rewrite_for_loops,
+                "wrap calls": options.wrap_calls,
+                "alias builtins": options.alias_builtins,
+                "minify output": options.minify_output,
+                "encrypt output": options.encrypt_output,
+            }.items()
+            if is_enabled
+        ]
+        return ", ".join(enabled) if enabled else "none"
+
 
 def main() -> None:
     root = tk.Tk()
     app = ToiletDuckificatorApp(root)
-    root.after(120, lambda: app._append_log("Wybierz plik lub folder i kliknij Uruchom obfuskację."))
+    root.after(120, lambda: app._append_log("Choose a file or folder and click Run Obfuscation."))
     root.mainloop()
 
 

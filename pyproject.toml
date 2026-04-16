@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "toiletduckificator"
 version = "0.1.0"
-description = "Simple Python variable obfuscator with a Tkinter GUI."
+description = "Configurable Python obfuscator with a Tkinter GUI."
 requires-python = ">=3.11"
 
 [project.scripts]
