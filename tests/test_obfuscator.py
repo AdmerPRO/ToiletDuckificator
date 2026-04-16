@@ -5,7 +5,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from toiletduckificator.obfuscator import ObfuscationOptions, obfuscate_path, obfuscate_source
+from toiletduckificator.obfuscator import ObfuscationOptions, ObfuscatorError, obfuscate_path, obfuscate_source
 
 
 IDENTIFIER_RE = re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_]{15}\b")
@@ -559,6 +559,39 @@ class TestObfuscator(unittest.TestCase):
 
             output_relative_paths = sorted(result.output_path.relative_to(output_root) for result in results)
             self.assertIn(Path("__main__.py"), output_relative_paths)
+
+    def test_folder_bundle_writes_single_duck_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source_root = Path(tmp_dir) / "source"
+            output_root = Path(tmp_dir) / "output"
+            source_root.mkdir()
+            (source_root / "main.py").write_text("from helper import build\nprint(build())\n", encoding="utf-8")
+            (source_root / "helper.py").write_text("def build():\n    return 'duck'\n", encoding="utf-8")
+
+            results = obfuscate_path(
+                source_root,
+                output_root,
+                options=_plain_options(bundle_folder_to_file=True),
+            )
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].output_path, output_root / "source.duck.py")
+            bundled = results[0].output_path.read_text(encoding="utf-8")
+            self.assertIn("_DUCK_MODULES", bundled)
+            self.assertIn("importlib.abc", bundled)
+
+    def test_folder_bundle_requires_clear_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source_root = Path(tmp_dir) / "source"
+            source_root.mkdir()
+            (source_root / "alpha.py").write_text("print('alpha')\n", encoding="utf-8")
+            (source_root / "beta.py").write_text("print('beta')\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ObfuscatorError, "Single-file folder bundling requires a top-level entrypoint"):
+                obfuscate_path(
+                    source_root,
+                    options=_plain_options(bundle_folder_to_file=True),
+                )
 
 
 if __name__ == "__main__":

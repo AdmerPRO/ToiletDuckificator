@@ -4,7 +4,7 @@ import ast
 import base64
 import secrets
 import symtable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import re
 from typing import TypeAlias
@@ -46,6 +46,7 @@ class ObfuscationOptions:
     rename_identifiers: bool = True
     obfuscate_literals: bool = True
     rename_modules: bool = True
+    bundle_folder_to_file: bool = False
     rewrite_dynamic_imports: bool = True
     rewrite_for_loops: bool = True
     wrap_calls: bool = True
@@ -1297,6 +1298,159 @@ def _destination_for_file(path: Path, output_root: Path) -> Path:
     return output_root / path.name
 
 
+def _destination_for_folder_bundle(path: Path, output_root: Path) -> Path:
+    if output_root.suffix == ".py":
+        return output_root
+    return output_root / f"{path.name}.duck.py"
+
+
+def _module_package_name(module_name: str | None) -> str | None:
+    if not module_name:
+        return None
+    return module_name.rpartition(".")[0] or None
+
+
+def _build_bundle_entrypoint(
+    py_files: list[Path],
+    source_root: Path,
+) -> tuple[Path, str | None]:
+    top_level_files = [py_file for py_file in py_files if py_file.parent == source_root]
+    priority_names = ("__main__.py", "main.py", "start.py", "app.py")
+
+    for file_name in priority_names:
+        for py_file in top_level_files:
+            if py_file.name == file_name:
+                relative_path = py_file.relative_to(source_root)
+                current_module = _module_name_from_relative_path(relative_path)
+                return py_file, _module_package_name(current_module)
+
+    if len(top_level_files) == 1:
+        py_file = top_level_files[0]
+        relative_path = py_file.relative_to(source_root)
+        current_module = _module_name_from_relative_path(relative_path)
+        return py_file, _module_package_name(current_module)
+
+    raise ObfuscatorError(
+        "Single-file folder bundling requires a top-level entrypoint such as __main__.py, main.py, start.py, or app.py."
+    )
+
+
+def _build_bundle_loader_source(
+    module_sources: dict[str, tuple[str, str]],
+    entrypoint_source: str,
+    entrypoint_relative_path: Path,
+    entrypoint_package: str | None,
+) -> str:
+    lines = [
+        "import importlib.abc",
+        "import importlib.util",
+        "import pathlib",
+        "import sys",
+        "import types",
+        "",
+        f"_DUCK_MODULES = {repr(module_sources)}",
+        "",
+        "class _DuckLoader(importlib.abc.Loader):",
+        "    # Load bundled modules directly from the embedded source map.",
+        "    def __init__(self, fullname, payload):",
+        "        self.fullname = fullname",
+        "        self.source, self.relative_path = payload",
+        "        self.origin = str(pathlib.Path(__file__).resolve().parent / self.relative_path)",
+        "",
+        "    def create_module(self, spec):",
+        "        return None",
+        "",
+        "    def exec_module(self, module):",
+        "        module.__file__ = self.origin",
+        "        module.__loader__ = self",
+        "        module.__package__ = self.fullname if module.__spec__.submodule_search_locations is not None else self.fullname.rpartition('.')[0]",
+        "        if module.__spec__.submodule_search_locations is not None:",
+        "            module.__path__ = [str(pathlib.Path(self.origin).parent)]",
+        "        code = compile(self.source, self.origin, 'exec')",
+        "        exec(code, module.__dict__)",
+        "",
+        "class _DuckFinder(importlib.abc.MetaPathFinder):",
+        "    # Resolve bundled modules before Python falls back to the filesystem.",
+        "    def find_spec(self, fullname, path=None, target=None):",
+        "        payload = _DUCK_MODULES.get(fullname)",
+        "        if payload is None:",
+        "            return None",
+        "        loader = _DuckLoader(fullname, payload)",
+        "        is_package = payload[1].endswith('/__init__.py') or payload[1].endswith('\\\\__init__.py')",
+        "        return importlib.util.spec_from_loader(fullname, loader, origin=loader.origin, is_package=is_package)",
+        "",
+        "def _install_duck_finder():",
+        "    if not any(isinstance(finder, _DuckFinder) for finder in sys.meta_path):",
+        "        sys.meta_path.insert(0, _DuckFinder())",
+        "",
+        "def _run_duck_entrypoint():",
+        "    _install_duck_finder()",
+        "    entry_file = str(pathlib.Path(__file__).resolve().parent / "
+        f"{entrypoint_relative_path.as_posix()!r})",
+        "    module = types.ModuleType('__main__')",
+        "    module.__file__ = entry_file",
+        f"    module.__package__ = {entrypoint_package!r}",
+        "    module.__loader__ = None",
+        "    module.__builtins__ = __builtins__",
+        "    module.__spec__ = None",
+        "    sys.modules['__main__'] = module",
+        "    exec(compile(",
+        f"        {entrypoint_source!r},",
+        "        entry_file,",
+        "        'exec',",
+        "    ), module.__dict__)",
+        "",
+        "_run_duck_entrypoint()",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _obfuscate_folder_to_bundle(
+    source_path: Path,
+    output_path: Path,
+    py_files: list[Path],
+    *,
+    options: ObfuscationOptions,
+) -> ObfuscationResult:
+    if not py_files:
+        raise ObfuscatorError(f"No Python files found in folder: {source_path}")
+
+    protected_names_by_module = _collect_imported_symbol_dependencies(py_files, source_path)
+    bundle_options = replace(options, rename_modules=False, bundle_folder_to_file=False, encrypt_output=False)
+    entrypoint_file, entrypoint_package = _build_bundle_entrypoint(py_files, source_path)
+
+    module_sources: dict[str, tuple[str, str]] = {}
+    entrypoint_source = ""
+    for py_file in py_files:
+        relative_path = py_file.relative_to(source_path)
+        current_module = _module_name_from_relative_path(relative_path)
+        obfuscated = obfuscate_source(
+            py_file.read_text(encoding="utf-8"),
+            filename=str(py_file),
+            current_module=current_module,
+            protected_module_names=protected_names_by_module.get(current_module, set()),
+            options=bundle_options,
+        )
+
+        if py_file == entrypoint_file:
+            entrypoint_source = obfuscated
+            continue
+
+        if current_module is None:
+            continue
+        module_sources[current_module] = (obfuscated, relative_path.as_posix())
+
+    bundled = _build_bundle_loader_source(
+        module_sources,
+        entrypoint_source,
+        entrypoint_file.relative_to(source_path),
+        entrypoint_package,
+    )
+    final_output = _build_runtime_loader(bundled) if options.encrypt_output else bundled
+    output_path.write_text(final_output, encoding="utf-8")
+    return ObfuscationResult(source_path=source_path, output_path=output_path, changed=True)
+
+
 def obfuscate_path(
     path: str | Path,
     output_path: str | Path | None = None,
@@ -1311,6 +1465,8 @@ def obfuscate_path(
     if output_path is None:
         if source_path.is_file():
             output_root = source_path.with_name(f"{source_path.stem}.duck.py")
+        elif options.bundle_folder_to_file:
+            output_root = source_path.with_name(f"{source_path.name}.duck.py")
         else:
             output_root = source_path.with_name(f"{source_path.name}_duckified")
     else:
@@ -1323,9 +1479,14 @@ def obfuscate_path(
         destination.parent.mkdir(parents=True, exist_ok=True)
         return [_obfuscate_single_file(source_path, destination, options=options)]
 
+    py_files = sorted(source_path.rglob("*.py"))
+    if options.bundle_folder_to_file:
+        destination = _destination_for_folder_bundle(source_path, output_root)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        return [_obfuscate_folder_to_bundle(source_path, destination, py_files, options=options)]
+
     output_root.mkdir(parents=True, exist_ok=True)
     results: list[ObfuscationResult] = []
-    py_files = sorted(source_path.rglob("*.py"))
     protected_names_by_module = _collect_imported_symbol_dependencies(py_files, source_path)
     if options.rename_modules:
         relative_output_paths, module_name_map = _build_folder_layout(py_files, source_path)

@@ -13,6 +13,7 @@ The project ships with:
 ## Highlights
 
 - Obfuscate a single `.py` file or an entire directory tree.
+- Optionally bundle a whole Python folder into one runnable `.duck.py` file.
 - Preserve nested package imports when module and folder names are renamed.
 - Enable or disable every obfuscation stage independently.
 - Generate separate output paths so the source files stay untouched.
@@ -150,6 +151,7 @@ Every stage can be turned on or off through `ObfuscationOptions` in code or by u
 | `rename_identifiers` | `True` | Renames local variables, parameters, functions, and selected private members. |
 | `obfuscate_literals` | `True` | Rewrites integer literals and string literals inside collection literals. |
 | `rename_modules` | `True` | Renames modules and folders in folder-based obfuscation runs and rewrites local import paths. |
+| `bundle_folder_to_file` | `False` | Packs a whole folder tree into one runnable `.duck.py` file with an embedded module loader. |
 | `rewrite_dynamic_imports` | `True` | Replaces direct imports with `__import__`/`getattr`-based dynamic assignments. |
 | `rewrite_for_loops` | `True` | Converts eligible `for` loops into explicit iterator-driven `while` loops. |
 | `wrap_calls` | `True` | Routes function calls through a generated wrapper function. |
@@ -196,6 +198,26 @@ When you pass a directory to `obfuscate_path(...)`, the tool:
 5. writes obfuscated files into a separate output tree.
 
 Special filenames such as `main.py`, `start.py`, `app.py`, and `__init__.py` are preserved so entry points stay recognizable.
+
+### Single-file folder bundle
+
+If you want every module from a folder to end up in one output file, enable `bundle_folder_to_file`:
+
+```python
+from toiletduckificator import ObfuscationOptions, obfuscate_path
+
+options = ObfuscationOptions(bundle_folder_to_file=True)
+obfuscate_path("example_folder_program", "example_folder_program.duck.py", options=options)
+```
+
+In this mode the tool:
+
+1. obfuscates each module separately,
+2. embeds all non-entrypoint modules into one source map,
+3. installs a tiny in-memory importer,
+4. executes the top-level entrypoint from the generated `.duck.py`.
+
+The bundle mode expects a clear top-level entrypoint such as `__main__.py`, `main.py`, `start.py`, or `app.py`.
 
 ## Testing
 

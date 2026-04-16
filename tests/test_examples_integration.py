@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from toiletduckificator.obfuscator import obfuscate_path
+from toiletduckificator.obfuscator import ObfuscationOptions, obfuscate_path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +52,32 @@ class TestExampleIntegrations(unittest.TestCase):
             obfuscate_path(REPO_ROOT / "example_nested_program", output_root)
 
             stdout = _run_python(output_root / "main.py", cwd=output_root)
+
+            self.assertEqual(stdout, "[ NESTED TOILET DUCKIFICATOR RUNNING ON V2 ]\n")
+
+    def test_bundled_flat_folder_example_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_file = Path(tmp_dir) / "example_folder_program.duck.py"
+            obfuscate_path(
+                REPO_ROOT / "example_folder_program",
+                output_file,
+                options=ObfuscationOptions(bundle_folder_to_file=True),
+            )
+
+            stdout = _run_python(output_file, cwd=output_file.parent)
+
+            self.assertEqual(stdout, "Toilet Duckificator: total=109, count=5, high=3, highest=31\n")
+
+    def test_bundled_nested_folder_example_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_file = Path(tmp_dir) / "example_nested_program.duck.py"
+            obfuscate_path(
+                REPO_ROOT / "example_nested_program",
+                output_file,
+                options=ObfuscationOptions(bundle_folder_to_file=True),
+            )
+
+            stdout = _run_python(output_file, cwd=output_file.parent)
 
             self.assertEqual(stdout, "[ NESTED TOILET DUCKIFICATOR RUNNING ON V2 ]\n")
 

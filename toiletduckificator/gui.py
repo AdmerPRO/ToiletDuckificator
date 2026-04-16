@@ -23,6 +23,7 @@ class ToiletDuckificatorApp:
             "rename_identifiers": tk.BooleanVar(value=True),
             "obfuscate_literals": tk.BooleanVar(value=True),
             "rename_modules": tk.BooleanVar(value=True),
+            "bundle_folder_to_file": tk.BooleanVar(value=False),
             "rewrite_dynamic_imports": tk.BooleanVar(value=True),
             "rewrite_for_loops": tk.BooleanVar(value=True),
             "wrap_calls": tk.BooleanVar(value=True),
@@ -30,6 +31,7 @@ class ToiletDuckificatorApp:
             "minify_output": tk.BooleanVar(value=True),
             "encrypt_output": tk.BooleanVar(value=True),
         }
+        self.option_vars["bundle_folder_to_file"].trace_add("write", self._on_bundle_toggle)
 
         self._build_theme()
         self._build_layout()
@@ -93,6 +95,7 @@ class ToiletDuckificatorApp:
             ("rename_identifiers", "Rename identifiers"),
             ("obfuscate_literals", "Obfuscate literals"),
             ("rename_modules", "Rename modules and folders"),
+            ("bundle_folder_to_file", "Bundle folder into one .duck.py file"),
             ("rewrite_dynamic_imports", "Rewrite imports dynamically"),
             ("rewrite_for_loops", "Rewrite for-loops"),
             ("wrap_calls", "Wrap function calls"),
@@ -138,15 +141,13 @@ class ToiletDuckificatorApp:
         path = filedialog.askopenfilename(filetypes=[("Python files", "*.py")])
         if path:
             self.selected_path.set(path)
-            suggested = Path(path).with_name(f"{Path(path).stem}.duck.py")
-            self.output_path.set(str(suggested))
+            self.output_path.set(str(self._suggest_output_path(Path(path))))
 
     def pick_folder(self) -> None:
         path = filedialog.askdirectory()
         if path:
             self.selected_path.set(path)
-            suggested = Path(path).with_name(f"{Path(path).name}_duckified")
-            self.output_path.set(str(suggested))
+            self.output_path.set(str(self._suggest_output_path(Path(path))))
 
     def run_obfuscation(self) -> None:
         source = self.selected_path.get().strip()
@@ -205,6 +206,7 @@ class ToiletDuckificatorApp:
                 "rename identifiers": options.rename_identifiers,
                 "obfuscate literals": options.obfuscate_literals,
                 "rename modules": options.rename_modules,
+                "bundle folder into one file": options.bundle_folder_to_file,
                 "rewrite dynamic imports": options.rewrite_dynamic_imports,
                 "rewrite for-loops": options.rewrite_for_loops,
                 "wrap calls": options.wrap_calls,
@@ -215,6 +217,21 @@ class ToiletDuckificatorApp:
             if is_enabled
         ]
         return ", ".join(enabled) if enabled else "none"
+
+    def _suggest_output_path(self, source_path: Path) -> Path:
+        if source_path.is_file():
+            return source_path.with_name(f"{source_path.stem}.duck.py")
+        if self.option_vars["bundle_folder_to_file"].get():
+            return source_path.with_name(f"{source_path.name}.duck.py")
+        return source_path.with_name(f"{source_path.name}_duckified")
+
+    def _on_bundle_toggle(self, *_args: object) -> None:
+        source = self.selected_path.get().strip()
+        if not source:
+            return
+        source_path = Path(source)
+        if source_path.exists():
+            self.output_path.set(str(self._suggest_output_path(source_path)))
 
 
 def main() -> None:
