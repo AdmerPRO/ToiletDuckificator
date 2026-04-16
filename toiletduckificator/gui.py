@@ -46,7 +46,7 @@ class ToiletDuckificatorApp:
 
         subtitle = ttk.Label(
             outer,
-            text="Obfuskacja nazw, prostych literałów i wybranych wywołań builtinów dla plików Python.",
+            text="Obfuskacja nazw, importów, pętli, wywołań builtinów i loader runtime z odszyfrowaniem kodu.",
             style="Body.TLabel",
             padding=(0, 6, 0, 20),
         )
@@ -96,7 +96,7 @@ class ToiletDuckificatorApp:
         footer = ttk.Label(log_card, textvariable=self.status_text, style="Body.TLabel")
         footer.pack(anchor="w")
 
-        self._append_log("Program zapisuje wynik do osobnej ścieżki, żeby nie nadpisać oryginałów.")
+        self._append_log("Program zapisuje wynik do osobnej ścieżki i pakuje kod w loader uruchamiany dopiero w runtime.")
 
     def pick_file(self) -> None:
         path = filedialog.askopenfilename(filetypes=[("Python files", "*.py")])

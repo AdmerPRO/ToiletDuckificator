@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import base64
+import secrets
 import symtable
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +15,7 @@ VARIABLE_NAME_LENGTH = 16
 FUNCTION_NAME_LENGTH = 24
 BUILTIN_ALIAS_LENGTH = 24
 MODULE_NAME_LENGTH = 8
+HELPER_NAME_LENGTH = 20
 ENTRYPOINT_FILE_NAMES = {"main.py", "start.py", "app.py"}
 
 
@@ -47,6 +50,17 @@ class ScopeInfo:
     table: symtable.SymbolTable
     rename_map: dict[str, str]
     parent: "ScopeInfo | None"
+
+
+@dataclass(slots=True)
+class ClassContext:
+    rename_map: dict[str, str]
+    class_name: str
+
+
+@dataclass(slots=True)
+class MethodContext:
+    receiver_names: set[str]
 
 
 def _module_name_from_relative_path(relative_path: Path) -> str | None:
@@ -171,6 +185,10 @@ def _is_function_symbol(symbol: symtable.Symbol) -> bool:
     return all(namespace.get_type() == "function" for namespace in symbol.get_namespaces())
 
 
+def _is_private_name(name: str) -> bool:
+    return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+
+
 def _should_rename(table: symtable.SymbolTable, symbol: symtable.Symbol, name: str) -> bool:
     if not name.isidentifier():
         return False
@@ -179,13 +197,13 @@ def _should_rename(table: symtable.SymbolTable, symbol: symtable.Symbol, name: s
     if symbol.is_imported():
         return False
     if symbol.is_namespace() and not _is_function_symbol(symbol):
-        return False
+        return _is_private_name(name)
     if symbol.is_global() and not symbol.is_declared_global() and not symbol.is_local():
         return False
     if symbol.is_parameter():
         return True
     if symbol.is_local() and _is_function_symbol(symbol):
-        return table.get_type() != "class"
+        return table.get_type() != "class" or _is_private_name(name)
     return symbol.is_local()
 
 
@@ -235,6 +253,9 @@ class VariableObfuscator(ast.NodeTransformer):
         self.scope_map = scope_map
         self.used_names: set[str] = set()
         self.scope_stack: list[ScopeInfo] = [ScopeInfo(root_table, self._make_rename_map(root_table), None)]
+        self.class_stack: list[ClassContext] = []
+        self.method_stack: list[MethodContext] = []
+        self.class_rename_maps: dict[str, dict[str, str]] = {}
 
     @property
     def current_scope(self) -> ScopeInfo:
@@ -288,6 +309,26 @@ class VariableObfuscator(ast.NodeTransformer):
     def _exit_scope(self) -> None:
         self.scope_stack.pop()
 
+    def _current_method_receivers(self) -> set[str]:
+        if not self.method_stack:
+            return set()
+        return self.method_stack[-1].receiver_names
+
+    def _attribute_base_is_current_class(self, value: ast.AST) -> bool:
+        if not self.class_stack:
+            return False
+        if isinstance(value, ast.Name) and value.id in self._current_method_receivers():
+            return True
+        if isinstance(value, ast.Name) and value.id == self.class_stack[-1].class_name:
+            return True
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == self.class_stack[-1].class_name
+        ):
+            return True
+        return False
+
     def _visit_function_scope(self, node: FunctionLikeNode) -> FunctionLikeNode:
         node.name = self.current_scope.rename_map.get(node.name, node.name)
         node.decorator_list = [self.visit(item) for item in node.decorator_list]
@@ -295,9 +336,16 @@ class VariableObfuscator(ast.NodeTransformer):
             node.returns = self.visit(node.returns)
         for type_param in getattr(node, "type_params", []):
             self.visit(type_param)
+        parent_is_class = self.current_scope.table.get_type() == "class"
         self._with_new_scope(node)
         node.args = self.visit(node.args)
+        if parent_is_class:
+            positional_args = [*node.args.posonlyargs, *node.args.args]
+            receiver_names = {positional_args[0].arg} if positional_args else set()
+            self.method_stack.append(MethodContext(receiver_names))
         node.body = [self.visit(item) for item in node.body]
+        if parent_is_class:
+            self.method_stack.pop()
         self._exit_scope()
         return node
 
@@ -315,11 +363,15 @@ class VariableObfuscator(ast.NodeTransformer):
         return node
 
     def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
+        node.name = self.current_scope.rename_map.get(node.name, node.name)
         node.bases = [self.visit(base) for base in node.bases]
         node.keywords = [self.visit(keyword_node) for keyword_node in node.keywords]
         node.decorator_list = [self.visit(item) for item in node.decorator_list]
-        self._with_new_scope(node)
+        scope = self._with_new_scope(node)
+        self.class_rename_maps[node.name] = scope.rename_map
+        self.class_stack.append(ClassContext(scope.rename_map, node.name))
         node.body = [self.visit(item) for item in node.body]
+        self.class_stack.pop()
         self._exit_scope()
         return node
 
@@ -375,6 +427,19 @@ class VariableObfuscator(ast.NodeTransformer):
         replacement = self._resolve_name(node.id)
         if replacement:
             node.id = replacement
+        return node
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+        node.value = self.visit(node.value)
+        replacement = None
+        if self.class_stack and self._attribute_base_is_current_class(node.value):
+            replacement = self.class_stack[-1].rename_map.get(node.attr)
+        elif isinstance(node.value, ast.Name):
+            replacement = self.class_rename_maps.get(node.value.id, {}).get(node.attr)
+        elif isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
+            replacement = self.class_rename_maps.get(node.value.func.id, {}).get(node.attr)
+        if replacement:
+            node.attr = replacement
         return node
 
     def visit_Global(self, node: ast.Global) -> ast.AST:
@@ -508,19 +573,108 @@ class ModuleImportObfuscator(ast.NodeTransformer):
 
         return node
 
+
+class DynamicImportObfuscator(ast.NodeTransformer):
+    def __init__(self) -> None:
+        self.used_names: set[str] = set()
+
+    def _temp_name(self) -> str:
+        return f"_duck_{generate_identifier(self.used_names, length=HELPER_NAME_LENGTH - 6)}"
+
+    def visit_Import(self, node: ast.Import) -> list[ast.stmt]:
+        statements: list[ast.stmt] = []
+        for alias in node.names:
+            if "." in alias.name and alias.asname is None:
+                target_name = alias.name.split(".", 1)[0]
+                fromlist_elts: list[ast.expr] = []
+            elif "." in alias.name:
+                target_name = alias.asname or alias.name
+                fromlist_elts = [ast.Constant(value="_")]
+            else:
+                target_name = alias.asname or alias.name
+                fromlist_elts = []
+
+            import_call = ast.Call(
+                func=ast.Name(id="__import__", ctx=ast.Load()),
+                args=[
+                    ast.Constant(value=alias.name),
+                    ast.Call(func=ast.Name(id="globals", ctx=ast.Load()), args=[], keywords=[]),
+                    ast.Call(func=ast.Name(id="locals", ctx=ast.Load()), args=[], keywords=[]),
+                    ast.Tuple(elts=fromlist_elts, ctx=ast.Load()),
+                    ast.Constant(value=0),
+                ],
+                keywords=[],
+            )
+            statements.append(
+                ast.Assign(
+                    targets=[ast.Name(id=target_name, ctx=ast.Store())],
+                    value=import_call,
+                )
+            )
+        return statements
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.AST | list[ast.stmt]:
+        if any(alias.name == "*" for alias in node.names):
+            return node
+
+        temp_name = self._temp_name()
+        alias_names = [alias.name for alias in node.names]
+        import_call = ast.Call(
+            func=ast.Name(id="__import__", ctx=ast.Load()),
+            args=[
+                ast.Constant(value=node.module or ""),
+                ast.Call(func=ast.Name(id="globals", ctx=ast.Load()), args=[], keywords=[]),
+                ast.Call(func=ast.Name(id="locals", ctx=ast.Load()), args=[], keywords=[]),
+                ast.Tuple(elts=[ast.Constant(value=name) for name in alias_names], ctx=ast.Load()),
+                ast.Constant(value=node.level),
+            ],
+            keywords=[],
+        )
+        statements: list[ast.stmt] = [
+            ast.Assign(
+                targets=[ast.Name(id=temp_name, ctx=ast.Store())],
+                value=import_call,
+            )
+        ]
+        for alias in node.names:
+            target_name = alias.asname or alias.name
+            statements.append(
+                ast.Assign(
+                    targets=[ast.Name(id=target_name, ctx=ast.Store())],
+                    value=ast.Call(
+                        func=ast.Name(id="getattr", ctx=ast.Load()),
+                        args=[ast.Name(id=temp_name, ctx=ast.Load()), ast.Constant(value=alias.name)],
+                        keywords=[],
+                    ),
+                )
+            )
+        return statements
+
+
 class BuiltinAliasObfuscator(ast.NodeTransformer):
     """Replace obvious builtin calls with obfuscated aliases."""
 
     CANDIDATES = {
+        "__import__",
         "dict",
         "enumerate",
+        "filter",
+        "getattr",
+        "globals",
+        "isinstance",
         "len",
         "list",
+        "locals",
+        "map",
         "max",
+        "next",
         "object",
+        "open",
         "print",
+        "range",
         "round",
         "set",
+        "setattr",
         "sum",
         "tuple",
     }
@@ -533,7 +687,7 @@ class BuiltinAliasObfuscator(ast.NodeTransformer):
         if isinstance(node.ctx, ast.Load) and node.id in self.CANDIDATES:
             alias = self.aliases.setdefault(
                 node.id,
-                generate_identifier(self.used_names, length=BUILTIN_ALIAS_LENGTH),
+                f"_duck_{generate_identifier(self.used_names, length=BUILTIN_ALIAS_LENGTH - 6)}",
             )
             node.id = alias
         return node
@@ -548,6 +702,129 @@ class BuiltinAliasObfuscator(ast.NodeTransformer):
                 )
             )
         return assignments
+
+
+class ForLoopObfuscator(ast.NodeTransformer):
+    def __init__(self) -> None:
+        self.used_names: set[str] = set()
+
+    def _temp_name(self) -> str:
+        return f"_duck_{generate_identifier(self.used_names, length=HELPER_NAME_LENGTH - 6)}"
+
+    def visit_For(self, node: ast.For) -> ast.AST | list[ast.stmt]:
+        node = self.generic_visit(node)
+        if node.orelse:
+            return node
+
+        iterator_name = self._temp_name()
+        loop_setup = ast.Assign(
+            targets=[ast.Name(id=iterator_name, ctx=ast.Store())],
+            value=ast.Call(func=ast.Name(id="iter", ctx=ast.Load()), args=[node.iter], keywords=[]),
+        )
+        next_value = ast.Assign(
+            targets=[node.target],
+            value=ast.Call(
+                func=ast.Name(id="next", ctx=ast.Load()),
+                args=[ast.Name(id=iterator_name, ctx=ast.Load())],
+                keywords=[],
+            ),
+        )
+        guard = ast.Try(
+            body=[next_value],
+            handlers=[
+                ast.ExceptHandler(
+                    type=ast.Name(id="StopIteration", ctx=ast.Load()),
+                    name=None,
+                    body=[ast.Break()],
+                )
+            ],
+            orelse=[],
+            finalbody=[],
+        )
+        return [
+            loop_setup,
+            ast.While(
+                test=ast.Constant(value=True),
+                body=[guard, *node.body],
+                orelse=[],
+            ),
+        ]
+
+
+class CallWrapperObfuscator(ast.NodeTransformer):
+    def __init__(self) -> None:
+        self.wrapper_name = f"_duck_{generate_identifier(set(), length=HELPER_NAME_LENGTH - 6)}"
+        self._disabled_stack = [False]
+
+    def _push_disabled(self, disabled: bool) -> None:
+        self._disabled_stack.append(disabled)
+
+    def _pop_disabled(self) -> None:
+        self._disabled_stack.pop()
+
+    @property
+    def _disabled(self) -> bool:
+        return self._disabled_stack[-1]
+
+    def build_wrapper_function(self) -> ast.FunctionDef:
+        wrapper_name = ast.Name(id=self.wrapper_name, ctx=ast.Load())
+        return ast.FunctionDef(
+            name=self.wrapper_name,
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[ast.arg(arg="_f")],
+                vararg=ast.arg(arg="_a"),
+                kwonlyargs=[],
+                kw_defaults=[],
+                kwarg=ast.arg(arg="_k"),
+                defaults=[],
+            ),
+            body=[
+                ast.If(
+                    test=ast.BoolOp(
+                        op=ast.And(),
+                        values=[ast.Constant(value=False), ast.Call(func=wrapper_name, args=[], keywords=[])],
+                    ),
+                    body=[ast.Return(value=ast.Constant(value=None))],
+                    orelse=[],
+                ),
+                ast.Return(
+                    value=ast.Call(
+                        func=ast.Name(id="_f", ctx=ast.Load()),
+                        args=[ast.Starred(value=ast.Name(id="_a", ctx=ast.Load()), ctx=ast.Load())],
+                        keywords=[ast.keyword(arg=None, value=ast.Name(id="_k", ctx=ast.Load()))],
+                    )
+                ),
+            ],
+            decorator_list=[],
+        )
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        self._push_disabled(node.name == self.wrapper_name)
+        node = self.generic_visit(node)
+        self._pop_disabled()
+        return node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
+        self._push_disabled(node.name == self.wrapper_name)
+        node = self.generic_visit(node)
+        self._pop_disabled()
+        return node
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        node = self.generic_visit(node)
+        if self._disabled:
+            return node
+        if isinstance(node.func, ast.Name) and node.func.id == self.wrapper_name:
+            return node
+        return ast.copy_location(
+            ast.Call(
+                func=ast.Name(id=self.wrapper_name, ctx=ast.Load()),
+                args=[node.func, *node.args],
+                keywords=node.keywords,
+            ),
+            node,
+        )
 
 
 _SIMPLE_BLOCK_PATTERNS = (
@@ -571,6 +848,49 @@ def _minify_generated_source(source: str) -> str:
     return compact
 
 
+def _encrypt_source(source: str) -> tuple[bytes, bytes]:
+    raw = source.encode("utf-8")
+    key = secrets.token_bytes(8)
+    encrypted = bytes(raw[index] ^ key[index % len(key)] for index in range(len(raw)))
+    return key, base64.b85encode(encrypted)
+
+
+def _build_runtime_loader(source: str) -> str:
+    key, payload = _encrypt_source(source)
+    key_literal = repr(base64.b85encode(key))
+    payload_literal = repr(payload)
+    return _minify_generated_source(
+        "\n".join(
+            [
+                "_b=__builtins__",
+                "_g=getattr",
+                "_i=isinstance",
+                "_h=(lambda n:(_b[n] if _i(_b,dict) else _g(_b,n)))",
+                "_j=_h('__import__')",
+                "_e=_h('exec')",
+                "_m=_j('base64',globals(),locals(),('b85decode',),0)",
+                "_d=_g(_m,'b85decode')",
+                f"_k=_d({key_literal})",
+                f"_p=_d({payload_literal})",
+                "def _x(_v,_w):",
+                "    _s=[]",
+                "    _n=0",
+                "    while _n<len(_v):",
+                "        _s.append(_v[_n]^_w[_n%len(_w)])",
+                "        _n+=1",
+                "    return bytes(_s)",
+                "def _q(_f,*_a,**_k):",
+                "    if False and _f is None:",
+                "        return None",
+                "    return _f(*_a,**_k)",
+                "while False:",
+                "    _q(print,'duck')",
+                "_e(_x(_p,_k).decode(),globals(),locals())",
+            ]
+        )
+    )
+
+
 def obfuscate_source(
     source: str,
     filename: str = "<memory>",
@@ -585,16 +905,20 @@ def obfuscate_source(
         raise ObfuscatorError(str(error)) from error
 
     scope_map = _build_scope_table_map(tree, symbol_table)
-    renamed = VariableObfuscator(symbol_table, scope_map).visit(tree)
-    transformed = LiteralObfuscator().visit(renamed)
+    transformed: ast.AST = VariableObfuscator(symbol_table, scope_map).visit(tree)
+    transformed = LiteralObfuscator().visit(transformed)
     if module_name_map:
         transformed = ModuleImportObfuscator(module_name_map, current_module).visit(transformed)
+    transformed = DynamicImportObfuscator().visit(transformed)
+    transformed = ForLoopObfuscator().visit(transformed)
+    call_wrapper = CallWrapperObfuscator()
+    transformed = call_wrapper.visit(transformed)
     builtin_aliaser = BuiltinAliasObfuscator()
     transformed = builtin_aliaser.visit(transformed)
     if isinstance(transformed, ast.Module):
-        transformed.body = builtin_aliaser.build_alias_assignments() + transformed.body
+        transformed.body = builtin_aliaser.build_alias_assignments() + [call_wrapper.build_wrapper_function()] + transformed.body
     ast.fix_missing_locations(transformed)
-    return _minify_generated_source(ast.unparse(transformed))
+    return _build_runtime_loader(_minify_generated_source(ast.unparse(transformed)))
 
 
 def _destination_for_file(path: Path, output_root: Path) -> Path:

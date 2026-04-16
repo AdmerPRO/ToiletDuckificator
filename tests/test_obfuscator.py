@@ -17,8 +17,24 @@ def _user_callables(namespace: dict[str, object]) -> list[object]:
     return [
         value
         for key, value in namespace.items()
-        if key != "__builtins__" and callable(value) and getattr(value, "__module__", None) is None
+        if key != "__builtins__"
+        and not key.startswith("_duck_")
+        and not (key.startswith("_") and len(key) <= 2)
+        and callable(value)
+        and getattr(value, "__module__", None) is None
     ]
+
+
+def _user_values(namespace: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in namespace.items()
+        if key != "__builtins__" and not key.startswith("_duck_") and not (key.startswith("_") and len(key) <= 2)
+    }
+
+
+def _user_data_values(namespace: dict[str, object]) -> list[object]:
+    return [value for value in _user_values(namespace).values() if not callable(value)]
 
 
 class TestObfuscator(unittest.TestCase):
@@ -37,8 +53,10 @@ class TestObfuscator(unittest.TestCase):
         self.assertNotIn("counter", result)
         self.assertNotIn("local_total", result)
         self.assertNotIn("compute", result)
-        self.assertGreaterEqual(len(set(IDENTIFIER_RE.findall(result))), 3)
-        self.assertGreaterEqual(len(set(FUNCTION_RE.findall(result))), 1)
+        self.assertIn("b85decode", result)
+        namespace: dict[str, object] = {}
+        exec(result, namespace)
+        self.assertGreaterEqual(len(_user_values(namespace)), 2)
 
     def test_does_not_rename_imports_or_attributes(self) -> None:
         source = textwrap.dedent(
@@ -50,10 +68,11 @@ class TestObfuscator(unittest.TestCase):
             """
         )
 
-        result = obfuscate_source(source)
-        self.assertIn("math.pi", result)
-        self.assertIn("import math", result)
-        self.assertNotIn(" radius ", " " + result + " ")
+        namespace: dict[str, object] = {}
+        exec(obfuscate_source(source), namespace)
+        values = _user_data_values(namespace)
+        self.assertIn(5, values)
+        self.assertIn(25 * 3.141592653589793, values)
 
     def test_handles_global_and_nonlocal(self) -> None:
         source = textwrap.dedent(
@@ -74,10 +93,12 @@ class TestObfuscator(unittest.TestCase):
         )
 
         result = obfuscate_source(source)
-        self.assertIn("nonlocal", result)
-        self.assertIn("global", result)
         self.assertNotIn("total", result)
         self.assertNotIn("flag", result)
+        namespace: dict[str, object] = {}
+        exec(result, namespace)
+        outer = _user_callables(namespace)[0]
+        self.assertEqual(outer(), 3)
 
     def test_handles_comprehensions_and_walrus(self) -> None:
         source = textwrap.dedent(
@@ -153,9 +174,11 @@ class TestObfuscator(unittest.TestCase):
         )
 
         result = obfuscate_source(source)
-        self.assertIn("int.from_bytes", result)
         self.assertNotIn("= 513", result)
         self.assertNotIn("= -7", result)
+        namespace: dict[str, object] = {}
+        exec(result, namespace)
+        self.assertEqual(sorted(_user_data_values(namespace)), [-7, 513])
 
     def test_obfuscates_strings_inside_data_literals(self) -> None:
         source = textwrap.dedent(
@@ -166,7 +189,7 @@ class TestObfuscator(unittest.TestCase):
 
         namespace: dict[str, object] = {}
         exec(obfuscate_source(source), namespace)
-        payload_key = next(key for key in namespace if key != "__builtins__")
+        payload_key = next(key for key, value in _user_values(namespace).items() if not callable(value))
         self.assertEqual(
             namespace[payload_key],
             {"message": "duck", "items": ["alpha", "beta"]},
@@ -181,7 +204,8 @@ class TestObfuscator(unittest.TestCase):
         )
 
         result = obfuscate_source(source)
-        self.assertRegex(result, r"def [a-zA-Z_][a-zA-Z0-9_]{23}\(\): return ")
+        self.assertNotIn("\n\n\n", result)
+        self.assertIn("b85decode", result)
 
     def test_renames_function_definitions_to_24_characters(self) -> None:
         source = textwrap.dedent(
@@ -197,8 +221,9 @@ class TestObfuscator(unittest.TestCase):
         result = obfuscate_source(source)
         self.assertNotIn("helper", result)
         self.assertNotIn("call_helper", result)
-        function_names = set(FUNCTION_RE.findall(result))
-        self.assertGreaterEqual(len(function_names), 2)
+        namespace: dict[str, object] = {}
+        exec(result, namespace)
+        self.assertEqual(len(_user_callables(namespace)), 2)
 
     def test_aliases_common_builtins(self) -> None:
         source = textwrap.dedent(
@@ -210,8 +235,10 @@ class TestObfuscator(unittest.TestCase):
 
         result = obfuscate_source(source)
         self.assertNotIn("sum(", result)
-        self.assertNotIn("len(", result)
-        self.assertIn("=", result)
+        namespace: dict[str, object] = {}
+        exec(result, namespace)
+        build = _user_callables(namespace)[0]
+        self.assertEqual(build([1, 2, 3]), 9)
 
     def test_folder_obfuscation_renames_nested_paths_and_updates_imports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -266,7 +293,7 @@ class TestObfuscator(unittest.TestCase):
 
             results = obfuscate_path(source_root, output_root)
 
-            self.assertEqual(len(results), 5)
+            self.assertEqual(len(results), 6)
             output_relative_paths = sorted(result.output_path.relative_to(output_root) for result in results)
             output_names = [path.name for path in output_relative_paths]
 
@@ -289,6 +316,28 @@ class TestObfuscator(unittest.TestCase):
             self.assertNotIn("from services.report_builder import", output_sources)
             self.assertNotIn("from services.helpers.message_tools import", output_sources)
             self.assertNotIn("from settings import", output_sources)
+            self.assertIn("b85decode", output_sources)
+
+    def test_obfuscates_private_methods_and_attributes(self) -> None:
+        source = textwrap.dedent(
+            """
+            class Example:
+                def __init__(self):
+                    self._value = 4
+
+                def _hidden(self):
+                    return self._value + 1
+
+            result = Example()._hidden()
+            """
+        )
+
+        result = obfuscate_source(source)
+        self.assertNotIn("_hidden", result)
+        self.assertNotIn("_value", result)
+        namespace: dict[str, object] = {}
+        exec(result, namespace)
+        self.assertIn(5, _user_data_values(namespace))
 
 
 if __name__ == "__main__":
