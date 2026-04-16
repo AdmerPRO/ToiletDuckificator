@@ -13,6 +13,12 @@ FUNCTION_RE = re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_]{23}\b")
 MODULE_FILE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{7}\.py$")
 
 
+def _plain_options(**overrides: object) -> ObfuscationOptions:
+    options = {"encrypt_output": False, "minify_output": False}
+    options.update(overrides)
+    return ObfuscationOptions(**options)
+
+
 def _user_callables(namespace: dict[str, object]) -> list[object]:
     return [
         value
@@ -240,6 +246,159 @@ class TestObfuscator(unittest.TestCase):
         build = _user_callables(namespace)[0]
         self.assertEqual(build([1, 2, 3]), 9)
 
+    def test_preserves_zero_argument_super_calls(self) -> None:
+        source = textwrap.dedent(
+            """
+            class Base:
+                def greet(self):
+                    return "base"
+
+            class Child(Base):
+                def greet(self):
+                    return super().greet()
+
+            result = Child().greet()
+            """
+        )
+
+        namespace: dict[str, object] = {}
+        exec(obfuscate_source(source, options=_plain_options()), namespace)
+        self.assertIn("base", _user_data_values(namespace))
+
+    def test_handles_except_handler_bindings(self) -> None:
+        source = textwrap.dedent(
+            """
+            def run(value):
+                try:
+                    1 / value
+                except ZeroDivisionError as err:
+                    return str(err)
+
+            result = run(0)
+            """
+        )
+
+        namespace: dict[str, object] = {}
+        exec(obfuscate_source(source, options=_plain_options()), namespace)
+        self.assertIn("division by zero", _user_data_values(namespace))
+
+    def test_handles_match_capture_bindings(self) -> None:
+        source = textwrap.dedent(
+            """
+            def run(value):
+                match value:
+                    case {"x": item}:
+                        return item
+                    case _:
+                        return None
+
+            result = run({"x": 7})
+            """
+        )
+
+        namespace: dict[str, object] = {}
+        exec(obfuscate_source(source, options=_plain_options()), namespace)
+        self.assertIn(7, _user_data_values(namespace))
+
+    def test_preserves_literal_match_patterns(self) -> None:
+        source = textwrap.dedent(
+            """
+            def run(value):
+                match value:
+                    case 1:
+                        return "one"
+                    case _:
+                        return "other"
+
+            result = (run(1), run(2))
+            """
+        )
+
+        namespace: dict[str, object] = {}
+        exec(obfuscate_source(source, options=_plain_options()), namespace)
+        self.assertIn(("one", "other"), _user_data_values(namespace))
+
+    def test_keeps_future_imports_ahead_of_generated_helpers(self) -> None:
+        source = textwrap.dedent(
+            """
+            from __future__ import annotations
+
+            class Node:
+                next: Node | None = None
+            """
+        )
+
+        result = obfuscate_source(source, options=_plain_options())
+        self.assertTrue(result.lstrip().startswith("from __future__ import annotations"))
+        namespace: dict[str, object] = {}
+        exec(result, namespace)
+
+    def test_renames_private_members_accessed_through_instance_variables(self) -> None:
+        source = textwrap.dedent(
+            """
+            class Example:
+                def __init__(self):
+                    self._value = 4
+
+                def _hidden(self):
+                    return self._value + 1
+
+            obj = Example()
+            result = obj._hidden()
+            """
+        )
+
+        result = obfuscate_source(source, options=_plain_options())
+        self.assertNotIn("_hidden", result)
+        self.assertNotIn("_value", result)
+        namespace: dict[str, object] = {}
+        exec(result, namespace)
+        self.assertIn(5, _user_data_values(namespace))
+
+    def test_does_not_treat_staticmethod_arguments_as_current_class_instances(self) -> None:
+        source = textwrap.dedent(
+            """
+            class Example:
+                def _secret(self):
+                    return 1
+
+                @staticmethod
+                def read(value):
+                    return value._secret
+
+            class Other:
+                def __init__(self):
+                    self._secret = 9
+
+            result = Example.read(Other())
+            """
+        )
+
+        namespace: dict[str, object] = {}
+        exec(obfuscate_source(source, options=_plain_options()), namespace)
+        self.assertIn(9, _user_data_values(namespace))
+
+    def test_builtin_aliasing_respects_shadowed_names_when_identifier_renaming_is_disabled(self) -> None:
+        source = textwrap.dedent(
+            """
+            def run():
+                len = lambda values: 123
+                return len([1, 2, 3])
+
+            result = run()
+            """
+        )
+
+        namespace: dict[str, object] = {}
+        exec(
+            obfuscate_source(
+                source,
+                options=_plain_options(rename_identifiers=False),
+            ),
+            namespace,
+        )
+        self.assertIn(123, _user_data_values(namespace))
+
     def test_folder_obfuscation_renames_nested_paths_and_updates_imports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             source_root = Path(tmp_dir) / "source"
@@ -375,6 +534,31 @@ class TestObfuscator(unittest.TestCase):
             self.assertIn(Path("main.py"), output_relative_paths)
             self.assertIn(Path("pkg", "__init__.py"), output_relative_paths)
             self.assertIn(Path("pkg", "helper.py"), output_relative_paths)
+
+    def test_single_file_output_path_can_be_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source_file = Path(tmp_dir) / "script.py"
+            output_root = Path(tmp_dir) / "output"
+            source_file.write_text("value = 1\n", encoding="utf-8")
+            output_root.mkdir()
+
+            results = obfuscate_path(source_file, output_root, options=_plain_options())
+
+            self.assertEqual(results[0].output_path, output_root / "script.py")
+            self.assertTrue((output_root / "script.py").exists())
+
+    def test_folder_obfuscation_preserves_dunder_main(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source_root = Path(tmp_dir) / "package"
+            output_root = Path(tmp_dir) / "output"
+            source_root.mkdir()
+            (source_root / "__init__.py").write_text("", encoding="utf-8")
+            (source_root / "__main__.py").write_text('print("duck")\n', encoding="utf-8")
+
+            results = obfuscate_path(source_root, output_root, options=_plain_options())
+
+            output_relative_paths = sorted(result.output_path.relative_to(output_root) for result in results)
+            self.assertIn(Path("__main__.py"), output_relative_paths)
 
 
 if __name__ == "__main__":
