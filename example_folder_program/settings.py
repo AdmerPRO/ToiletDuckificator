@@ -1,0 +1,3 @@
+APP_NAME = "Toilet Duckificator"
+SAMPLE_SCORES = [12, 18, 21, 27, 31]
+WARNING_THRESHOLD = 20

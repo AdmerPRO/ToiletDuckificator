@@ -12,6 +12,8 @@ from .name_generator import generate_identifier
 VARIABLE_NAME_LENGTH = 16
 FUNCTION_NAME_LENGTH = 24
 BUILTIN_ALIAS_LENGTH = 24
+MODULE_NAME_LENGTH = 8
+ENTRYPOINT_FILE_NAMES = {"main.py", "start.py", "app.py"}
 
 
 SCOPE_NODE_TYPES = (
@@ -45,6 +47,96 @@ class ScopeInfo:
     table: symtable.SymbolTable
     rename_map: dict[str, str]
     parent: "ScopeInfo | None"
+
+
+def _module_name_from_relative_path(relative_path: Path) -> str | None:
+    parts = list(relative_path.with_suffix("").parts)
+    if not parts:
+        return None
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts) if parts else None
+
+
+def _resolve_import_from_module(module: str | None, level: int, current_module: str | None) -> str | None:
+    if level == 0:
+        return module
+    if current_module is None:
+        return module
+
+    package_parts = current_module.split(".")[:-1]
+    ancestor_count = len(package_parts) - (level - 1)
+    if ancestor_count < 0:
+        return module
+
+    ancestor_parts = package_parts[:ancestor_count]
+    if module is None:
+        return ".".join(ancestor_parts) if ancestor_parts else None
+    return ".".join(ancestor_parts + module.split("."))
+
+
+def _absolute_to_relative_import(module: str, current_module: str) -> tuple[int, str | None]:
+    package_parts = current_module.split(".")[:-1]
+    target_parts = module.split(".")
+
+    common_length = 0
+    max_common = min(len(package_parts), len(target_parts))
+    while common_length < max_common and package_parts[common_length] == target_parts[common_length]:
+        common_length += 1
+
+    if common_length == 0:
+        return 0, module
+
+    level = len(package_parts) - common_length + 1
+    suffix = target_parts[common_length:]
+    return level, ".".join(suffix) if suffix else None
+
+
+def _build_folder_layout(
+    py_files: list[Path],
+    source_root: Path,
+) -> tuple[dict[Path, Path], dict[str, str]]:
+    used_names: set[str] = set()
+    directory_name_map: dict[Path, str] = {}
+    relative_output_paths: dict[Path, Path] = {}
+    module_name_map: dict[str, str] = {}
+
+    all_directories = sorted(
+        {
+            directory
+            for py_file in py_files
+            for directory in py_file.relative_to(source_root).parents
+            if directory != Path(".")
+        },
+        key=lambda path: (len(path.parts), path.parts),
+    )
+
+    for directory in all_directories:
+        directory_name_map[directory] = generate_identifier(used_names, length=MODULE_NAME_LENGTH)
+
+    for py_file in py_files:
+        relative_path = py_file.relative_to(source_root)
+
+        output_parts: list[str] = []
+        for depth, part in enumerate(relative_path.parts[:-1], start=1):
+            original_directory = Path(*relative_path.parts[:depth])
+            output_parts.append(directory_name_map[original_directory])
+
+        if relative_path.name == "__init__.py" or relative_path.name in ENTRYPOINT_FILE_NAMES:
+            output_file_name = relative_path.name
+        else:
+            output_file_name = f"{generate_identifier(used_names, length=MODULE_NAME_LENGTH)}.py"
+
+        output_relative_path = Path(*output_parts, output_file_name)
+
+        relative_output_paths[relative_path] = output_relative_path
+
+        original_module_name = _module_name_from_relative_path(relative_path)
+        output_module_name = _module_name_from_relative_path(output_relative_path)
+        if original_module_name and output_module_name:
+            module_name_map[original_module_name] = output_module_name
+
+    return relative_output_paths, module_name_map
 
 
 def _scope_kind(node: ast.AST) -> str:
@@ -382,6 +474,40 @@ class LiteralObfuscator(ast.NodeTransformer):
         return node
 
 
+class ModuleImportObfuscator(ast.NodeTransformer):
+    """Rewrite local imports after folder-level module renaming."""
+
+    def __init__(self, module_name_map: dict[str, str], current_module: str | None) -> None:
+        self.module_name_map = module_name_map
+        self.current_module = current_module
+
+    def visit_Import(self, node: ast.Import) -> ast.AST:
+        for alias in node.names:
+            alias.name = self.module_name_map.get(alias.name, alias.name)
+        return node
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.AST:
+        absolute_module = _resolve_import_from_module(node.module, node.level, self.current_module)
+        remapped_module = self.module_name_map.get(absolute_module) if absolute_module else None
+
+        if remapped_module:
+            if node.level > 0 and self.current_module is not None:
+                node.level, node.module = _absolute_to_relative_import(remapped_module, self.current_module)
+            else:
+                node.level = 0
+                node.module = remapped_module
+
+        package_module = absolute_module
+        for alias in node.names:
+            if package_module is None:
+                continue
+            imported_module = f"{package_module}.{alias.name}"
+            remapped_import = self.module_name_map.get(imported_module)
+            if remapped_import:
+                alias.name = remapped_import.rsplit(".", 1)[-1]
+
+        return node
+
 class BuiltinAliasObfuscator(ast.NodeTransformer):
     """Replace obvious builtin calls with obfuscated aliases."""
 
@@ -445,7 +571,13 @@ def _minify_generated_source(source: str) -> str:
     return compact
 
 
-def obfuscate_source(source: str, filename: str = "<memory>") -> str:
+def obfuscate_source(
+    source: str,
+    filename: str = "<memory>",
+    *,
+    current_module: str | None = None,
+    module_name_map: dict[str, str] | None = None,
+) -> str:
     try:
         tree = ast.parse(source, filename=filename)
         symbol_table = symtable.symtable(source, filename, "exec")
@@ -455,6 +587,8 @@ def obfuscate_source(source: str, filename: str = "<memory>") -> str:
     scope_map = _build_scope_table_map(tree, symbol_table)
     renamed = VariableObfuscator(symbol_table, scope_map).visit(tree)
     transformed = LiteralObfuscator().visit(renamed)
+    if module_name_map:
+        transformed = ModuleImportObfuscator(module_name_map, current_module).visit(transformed)
     builtin_aliaser = BuiltinAliasObfuscator()
     transformed = builtin_aliaser.visit(transformed)
     if isinstance(transformed, ast.Module):
@@ -490,16 +624,38 @@ def obfuscate_path(path: str | Path, output_path: str | Path | None = None) -> l
 
     output_root.mkdir(parents=True, exist_ok=True)
     results: list[ObfuscationResult] = []
-    for py_file in sorted(source_path.rglob("*.py")):
+    py_files = sorted(source_path.rglob("*.py"))
+    relative_output_paths, module_name_map = _build_folder_layout(py_files, source_path)
+
+    for py_file in py_files:
         relative_path = py_file.relative_to(source_path)
-        destination = output_root / relative_path
+        destination = output_root / relative_output_paths[relative_path]
         destination.parent.mkdir(parents=True, exist_ok=True)
-        results.append(_obfuscate_single_file(py_file, destination))
+        current_module = _module_name_from_relative_path(relative_path)
+        results.append(
+            _obfuscate_single_file(
+                py_file,
+                destination,
+                current_module=current_module,
+                module_name_map=module_name_map,
+            )
+        )
     return results
 
 
-def _obfuscate_single_file(source_path: Path, output_path: Path) -> ObfuscationResult:
+def _obfuscate_single_file(
+    source_path: Path,
+    output_path: Path,
+    *,
+    current_module: str | None = None,
+    module_name_map: dict[str, str] | None = None,
+) -> ObfuscationResult:
     original = source_path.read_text(encoding="utf-8")
-    obfuscated = obfuscate_source(original, filename=str(source_path))
+    obfuscated = obfuscate_source(
+        original,
+        filename=str(source_path),
+        current_module=current_module,
+        module_name_map=module_name_map,
+    )
     output_path.write_text(obfuscated, encoding="utf-8")
     return ObfuscationResult(source_path=source_path, output_path=output_path, changed=original != obfuscated)

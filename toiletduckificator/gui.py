@@ -128,10 +128,12 @@ class ToiletDuckificatorApp:
         try:
             results = obfuscate_path(source, output)
         except ObfuscatorError as error:
-            self.root.after(0, lambda: self._handle_error(str(error)))
+            message = str(error)
+            self.root.after(0, lambda message=message: self._handle_error(message))
             return
         except Exception as error:  # pragma: no cover - GUI safety net
-            self.root.after(0, lambda: self._handle_error(f"Unexpected error: {error}"))
+            message = f"Unexpected error: {error}"
+            self.root.after(0, lambda message=message: self._handle_error(message))
             return
 
         self.root.after(0, lambda: self._handle_success(results))

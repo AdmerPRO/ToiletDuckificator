@@ -1,13 +1,16 @@
 import ast
 import re
+import tempfile
 import textwrap
 import unittest
+from pathlib import Path
 
-from toiletduckificator.obfuscator import obfuscate_source
+from toiletduckificator.obfuscator import obfuscate_path, obfuscate_source
 
 
 IDENTIFIER_RE = re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_]{15}\b")
 FUNCTION_RE = re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_]{23}\b")
+MODULE_FILE_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{7}\.py$")
 
 
 def _user_callables(namespace: dict[str, object]) -> list[object]:
@@ -209,6 +212,83 @@ class TestObfuscator(unittest.TestCase):
         self.assertNotIn("sum(", result)
         self.assertNotIn("len(", result)
         self.assertIn("=", result)
+
+    def test_folder_obfuscation_renames_nested_paths_and_updates_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source_root = Path(tmp_dir) / "source"
+            output_root = Path(tmp_dir) / "output"
+            source_root.mkdir()
+            (source_root / "services").mkdir()
+            (source_root / "services" / "helpers").mkdir()
+
+            (source_root / "main.py").write_text(
+                textwrap.dedent(
+                    """
+                    from services.report_builder import build_report
+                    from settings import APP_NAME
+
+                    def run():
+                        return build_report(APP_NAME)
+
+
+                    if __name__ == "__main__":
+                        print(run())
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_root / "services" / "__init__.py").write_text("", encoding="utf-8")
+            (source_root / "services" / "helpers" / "__init__.py").write_text("", encoding="utf-8")
+            (source_root / "services" / "report_builder.py").write_text(
+                textwrap.dedent(
+                    """
+                    from services.helpers.message_tools import build_message
+
+                    def build_report(name):
+                        return build_message(name)
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_root / "services" / "helpers" / "message_tools.py").write_text(
+                textwrap.dedent(
+                    """
+                    def build_message(name):
+                        return f"Hello, {name}!"
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_root / "settings.py").write_text('APP_NAME = "Duck"\n', encoding="utf-8")
+
+            results = obfuscate_path(source_root, output_root)
+
+            self.assertEqual(len(results), 5)
+            output_relative_paths = sorted(result.output_path.relative_to(output_root) for result in results)
+            output_names = [path.name for path in output_relative_paths]
+
+            self.assertIn("main.py", output_names)
+            self.assertNotIn("settings.py", output_names)
+            self.assertNotIn("report_builder.py", output_names)
+            self.assertNotIn("message_tools.py", output_names)
+
+            for path in output_relative_paths:
+                if path.name not in {"main.py", "__init__.py"}:
+                    self.assertRegex(path.name, MODULE_FILE_RE.pattern)
+
+            nested_directories = {path.parent for path in output_relative_paths if path.parent != Path(".")}
+            self.assertTrue(nested_directories)
+            for directory in nested_directories:
+                for part in directory.parts:
+                    self.assertRegex(part, r"^[a-zA-Z_][a-zA-Z0-9_]{7}$")
+
+            output_sources = "\n".join(result.output_path.read_text(encoding="utf-8") for result in results)
+            self.assertNotIn("from services.report_builder import", output_sources)
+            self.assertNotIn("from services.helpers.message_tools import", output_sources)
+            self.assertNotIn("from settings import", output_sources)
 
 
 if __name__ == "__main__":
