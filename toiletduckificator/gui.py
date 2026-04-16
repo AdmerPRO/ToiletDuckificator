@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import threading
 import tkinter as tk
@@ -29,13 +29,13 @@ class ToiletDuckificatorApp:
         style.configure(".", font=("Segoe UI", 11))
         style.configure("Card.TFrame", background="#162132")
         style.configure("Panel.TFrame", background="#122033")
-        style.configure("Header.TLabel", background="#101723", foreground="#f8fafc", font=("Segoe UI Semibold", 22))
-        style.configure("Body.TLabel", background="#162132", foreground="#dbe5f0")
-        style.configure("Accent.TButton", background="#12b886", foreground="#081018", padding=(18, 10), borderwidth=0)
-        style.map("Accent.TButton", background=[("active", "#19c997")])
-        style.configure("Muted.TButton", background="#28415d", foreground="#f8fafc", padding=(12, 9), borderwidth=0)
+        style.configure("Header.TLabel", background="#101723", foreground="#F8FAFC", font=("Segoe UI Semibold", 22))
+        style.configure("Body.TLabel", background="#162132", foreground="#DBE5F0")
+        style.configure("Accent.TButton", background="#12B886", foreground="#081018", padding=(18, 10), borderwidth=0)
+        style.map("Accent.TButton", background=[("active", "#19C997")])
+        style.configure("Muted.TButton", background="#28415D", foreground="#F8FAFC", padding=(12, 9), borderwidth=0)
         style.map("Muted.TButton", background=[("active", "#355779")])
-        style.configure("Path.TEntry", fieldbackground="#0b1420", foreground="#f8fafc", bordercolor="#2e4259")
+        style.configure("Path.TEntry", fieldbackground="#0B1420", foreground="#F8FAFC", bordercolor="#2E4259")
 
     def _build_layout(self) -> None:
         outer = ttk.Frame(self.root, style="Panel.TFrame", padding=22)
@@ -46,7 +46,7 @@ class ToiletDuckificatorApp:
 
         subtitle = ttk.Label(
             outer,
-            text="Pierwszy etap: obfuskacja nazw zmiennych do losowych identyfikatorów długości 16.",
+            text="Obfuskacja nazw, prostych literałów i wybranych wywołań builtinów dla plików Python.",
             style="Body.TLabel",
             padding=(0, 6, 0, 20),
         )
@@ -84,9 +84,9 @@ class ToiletDuckificatorApp:
         self.log = tk.Text(
             log_card,
             wrap="word",
-            bg="#0b1420",
-            fg="#d7e3ef",
-            insertbackground="#d7e3ef",
+            bg="#0B1420",
+            fg="#D7E3EF",
+            insertbackground="#D7E3EF",
             relief="flat",
             height=16,
             font=("Cascadia Code", 10),
